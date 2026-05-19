@@ -13,9 +13,9 @@ if (fs.existsSync(dbPath)) {
     const testDb = new Database(dbPath);
     const cols = testDb.prepare("PRAGMA table_info(accounts)").all().map(c => c.name);
     testDb.close();
-    if (!cols.includes("status")) {
+    if (!cols.includes("phase") || !cols.includes("next_action")) {
       fs.unlinkSync(dbPath);
-      console.log("[DB] Старая база удалена");
+      console.log("[DB] Старая база удалена, создаём новую");
     }
   } catch (e) {
     fs.unlinkSync(dbPath);
