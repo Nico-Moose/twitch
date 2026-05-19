@@ -201,18 +201,22 @@ function getMasterPlaylist(channel, tokenData, agent) {
     if (res.status !== 200) throw new Error("Playlist: " + res.status);
     const lines = res.data.split("\n");
     let audioOnly = null;
-    let lowest = null;
+    // Собираем все варианты качества по порядку. В master playlist Twitch
+    // обычно идут от source (самое тяжёлое) к 160p (самое лёгкое). Берём ПОСЛЕДНИЙ
+    // не-audio_only вариант = минимальное видео-качество.
+    const allUrls = [];
 
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].includes("audio_only")) {
         for (let j = i + 1; j < lines.length; j++) {
           if (lines[j].startsWith("http")) { audioOnly = lines[j].trim(); break; }
         }
-      }
-      if (lines[i].startsWith("http") && !lowest) {
-        lowest = lines[i].trim();
+      } else if (lines[i].startsWith("http")) {
+        allUrls.push(lines[i].trim());
       }
     }
+    // Приоритет: audio_only (минимум трафика). Если его нет — самое низкое качество.
+    const lowest = allUrls.length ? allUrls[allUrls.length - 1] : null;
     return audioOnly || lowest;
   });
 }
@@ -246,6 +250,7 @@ function startHLS(account) {
 
     let errorCount = 0;
     let lastSegment = "";
+    let segmentSkipCounter = 0;
 
     const timer = setInterval(() => {
       httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
@@ -268,13 +273,18 @@ function startHLS(account) {
 
         if (newestSegment && newestSegment !== lastSegment) {
           lastSegment = newestSegment;
-          downloadSegment(newestSegment, agent);
+          // Качаем только каждый 3-й сегмент чтобы экономить трафик
+          // (Twitch засчитывает зрителя по факту запроса плейлиста, не по объёму скачанного)
+          segmentSkipCounter++;
+          if (segmentSkipCounter % 3 === 0) {
+            downloadSegment(newestSegment, agent);
+          }
         }
       }).catch(() => {
         errorCount++;
         if (errorCount >= 5) stopHLS(account.id);
       });
-    }, 5000);
+    }, 15000); // обновляем плейлист каждые 15 сек вместо 5 — экономия трафика x3
 
     watchers.set(account.id, { timer });
   }).catch(err => {
@@ -299,12 +309,20 @@ function startHLS(account) {
 function downloadSegment(url, agent) {
   try {
     const opts = new URL(url);
-    const reqOpts = { hostname: opts.hostname, path: opts.pathname + opts.search, method: "GET", timeout: 8000 };
+    const reqOpts = {
+      hostname: opts.hostname,
+      path: opts.pathname + opts.search,
+      method: "GET",
+      timeout: 8000,
+      // Range: 0-1023 — просим только первый КБ. Twitch отдаёт 206 Partial Content,
+      // зритель засчитывается, а трафик минимален.
+      headers: { "Range": "bytes=0-1023", "Connection": "close" },
+    };
     if (agent) reqOpts.agent = agent;
 
     const req = https.request(reqOpts, (res) => {
       let bytes = 0;
-      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 16000) res.destroy(); });
+      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 1024) res.destroy(); });
       res.on("end", () => {});
       res.on("error", () => {});
     });
