@@ -1,0 +1,12 @@
+{
+  "name": "twitch-viewer-bot",
+  "version": "1.0.0",
+  "description": "Twitch viewer bot - watches a stream via IRC connection",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "tmi.js": "1.8.5"
+  }
+}
