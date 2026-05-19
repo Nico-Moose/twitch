@@ -7,7 +7,7 @@ const apiRoutes = require("./src/api");
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 
-// Импорт аккаунтов из переменной окружения при первом запуске
+// Импорт аккаунтов из ENV при первом запуске
 const ACCOUNTS_RAW = process.env.TWITCH_ACCOUNTS || "";
 if (ACCOUNTS_RAW && db.getAccountCount() === 0) {
   ACCOUNTS_RAW.split("|").forEach(line => {
@@ -31,7 +31,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Авторизация middleware
+// Авторизация
 app.use("/api", (req, res, next) => {
   const pass = req.headers["x-pass"] || req.query.pass;
   if (pass === ADMIN_PASS) return next();
@@ -44,7 +44,7 @@ app.use("/admin", (req, res, next) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-// API роуты
+// API
 app.use("/api", apiRoutes);
 
 // Админка
@@ -52,7 +52,6 @@ app.get("/admin", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
-// Редирект на логин
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
@@ -65,6 +64,5 @@ app.listen(PORT, () => {
   // Автоподключение
   setTimeout(() => {
     twitchManager.connectAll();
-    twitchManager.startAutoRejoin();
   }, 2000);
 });

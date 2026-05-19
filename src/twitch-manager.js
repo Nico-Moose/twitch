@@ -13,8 +13,9 @@ function getStatus() {
   let connected = 0, disconnected = 0, errors = 0, cycling = 0;
 
   accounts.forEach(a => {
-    if (a.status === "подключен") connected++;
-    else if (a.status.includes("ошибка")) errors++;
+    const st = a.status || "отключен";
+    if (st === "подключен") connected++;
+    else if (st.includes("ошибка")) errors++;
     else disconnected++;
     if (a.cycle_active) cycling++;
   });
