@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Twitch Bot - Вход</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .login-box {
+      background: rgba(26, 26, 46, 0.95);
+      padding: 40px;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      text-align: center;
+      width: 360px;
+    }
+    .login-box h1 {
+      color: #9146ff;
+      margin-bottom: 10px;
+      font-size: 24px;
+    }
+    .login-box p {
+      color: #888;
+      margin-bottom: 30px;
+    }
+    .login-box input {
+      width: 100%;
+      padding: 14px;
+      border: 2px solid #333;
+      border-radius: 8px;
+      background: #16213e;
+      color: #fff;
+      font-size: 16px;
+      margin-bottom: 20px;
+      outline: none;
+      transition: border-color 0.3s;
+    }
+    .login-box input:focus {
+      border-color: #9146ff;
+    }
+    .login-box button {
+      width: 100%;
+      padding: 14px;
+      background: #9146ff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .login-box button:hover {
+      background: #7c3aed;
+    }
+    .error {
+      color: #f44336;
+      margin-top: 10px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <h1>🎮 Twitch Viewer Bot</h1>
+    <p>Введите пароль для доступа к панели</p>
+    <input type="password" id="pass" placeholder="Пароль" autofocus>
+    <button onclick="login()">Войти</button>
+    <p class="error" id="error">Неверный пароль</p>
+  </div>
+
+  <script>
+    document.getElementById("pass").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") login();
+    });
+
+    async function login() {
+      const pass = document.getElementById("pass").value;
+      const res = await fetch("/api/status", { headers: { "x-pass": pass } });
+      if (res.ok) {
+        localStorage.setItem("pass", pass);
+        window.location.href = "/admin?pass=" + encodeURIComponent(pass);
+      } else {
+        document.getElementById("error").style.display = "block";
+      }
+    }
+
+    // Авто-логин если пароль сохранён
+    const saved = localStorage.getItem("pass");
+    if (saved) {
+      fetch("/api/status", { headers: { "x-pass": saved } }).then(r => {
+        if (r.ok) window.location.href = "/admin?pass=" + encodeURIComponent(saved);
+      });
+    }
+  </script>
+</body>
+</html>
