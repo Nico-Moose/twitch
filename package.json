@@ -1,12 +1,14 @@
 {
   "name": "twitch-viewer-bot",
-  "version": "1.0.0",
-  "description": "Twitch viewer bot - watches a stream via IRC connection",
+  "version": "2.0.0",
+  "description": "Twitch viewer bot with web panel",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "tmi.js": "1.8.5"
+    "tmi.js": "1.8.5",
+    "better-sqlite3": "9.4.3",
+    "express": "4.18.2"
   }
 }
