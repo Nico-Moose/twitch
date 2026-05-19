@@ -5,409 +5,177 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Twitch Bot - Панель</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f0c29; color: #e0e0e0; min-height: 100vh; }
-    .navbar { background: rgba(26,26,46,0.98); padding: 12px 25px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2a2a4a; position: sticky; top: 0; z-index: 100; }
-    .navbar h1 { color: #9146ff; font-size: 18px; }
-    .nav-links { display: flex; gap: 5px; flex-wrap: wrap; }
-    .nav-links button { padding: 6px 12px; background: #1a1a2e; color: #aaa; border: 1px solid #333; border-radius: 6px; cursor: pointer; font-size: 12px; }
-    .nav-links button:hover, .nav-links button.active { background: #9146ff; color: #fff; border-color: #9146ff; }
-    .container { max-width: 1300px; margin: 0 auto; padding: 20px; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-    .stat-card { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 16px; border-radius: 10px; border: 1px solid #2a2a4a; }
-    .stat-card .value { font-size: 28px; font-weight: bold; color: #9146ff; }
-    .stat-card .label { color: #777; margin-top: 4px; font-size: 12px; }
-    .stat-card.green .value { color: #4caf50; }
-    .stat-card.red .value { color: #f44336; }
-    .stat-card.orange .value { color: #ff9800; }
-    .stat-card.blue .value { color: #2196f3; }
-    .section { background: rgba(26,26,46,0.95); border-radius: 10px; padding: 20px; margin-bottom: 16px; border: 1px solid #2a2a4a; }
-    .section h2 { color: #9146ff; margin-bottom: 12px; font-size: 16px; }
-    .btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px; }
-    .btn-primary { background: #9146ff; color: #fff; }
-    .btn-success { background: #4caf50; color: #fff; }
-    .btn-danger { background: #f44336; color: #fff; }
-    .btn-warning { background: #ff9800; color: #fff; }
-    .btn-info { background: #2196f3; color: #fff; }
-    .btn-pink { background: #e91e63; color: #fff; }
-    .btn-sm { padding: 4px 8px; font-size: 11px; }
-    .btn-group { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th { background: #16213e; color: #9146ff; padding: 10px 8px; text-align: left; }
-    td { padding: 8px; border-bottom: 1px solid #1a1a2e; }
-    tr:hover { background: rgba(145,70,255,0.05); }
-    .table-wrap { overflow-x: auto; }
-    .status { padding: 2px 7px; border-radius: 4px; font-size: 11px; }
-    .status-online { background: rgba(76,175,80,0.2); color: #4caf50; }
-    .status-offline { background: rgba(158,158,158,0.2); color: #9e9e9e; }
-    .status-error { background: rgba(244,67,54,0.2); color: #f44336; }
-    .status-connecting { background: rgba(33,150,243,0.2); color: #2196f3; }
-    .status-watching { background: rgba(76,175,80,0.2); color: #4caf50; }
-    .status-afk { background: rgba(255,152,0,0.2); color: #ff9800; }
-    input, select, textarea { padding: 8px 12px; border: 1px solid #333; border-radius: 6px; background: #16213e; color: #fff; font-size: 13px; outline: none; }
-    input:focus, textarea:focus { border-color: #9146ff; }
-    textarea { width: 100%; min-height: 80px; resize: vertical; font-family: monospace; }
-    .form-row { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
-    .form-row label { color: #aaa; min-width: 140px; font-size: 13px; }
-    .log-list { max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 11px; }
-    .log-item { padding: 4px 8px; border-bottom: 1px solid #111; }
-    .log-item .time { color: #555; }
-    .tabs { display: none; }
-    .tabs.active { display: block; }
-    .toast { position: fixed; bottom: 20px; right: 20px; background: #4caf50; color: #fff; padding: 10px 20px; border-radius: 8px; display: none; z-index: 1000; font-size: 13px; }
-    .timer-badge { font-size: 11px; color: #ff9800; font-weight: bold; }
-    .chat-box { background: #16213e; border-radius: 8px; padding: 15px; margin-top: 10px; }
-    .chat-input { display: flex; gap: 8px; margin-top: 10px; }
-    .chat-input input { flex: 1; }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',sans-serif;background:#0f0c29;color:#e0e0e0;min-height:100vh}
+    .top{background:rgba(26,26,46,.98);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2a2a4a;position:sticky;top:0;z-index:10}
+    .top h1{color:#9146ff;font-size:18px}
+    .top .status-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px}
+    .top .on{background:#4caf50}
+    .top .off{background:#666}
+    .wrap{max-width:900px;margin:0 auto;padding:20px}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:20px}
+    .card{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:16px;border-radius:10px;border:1px solid #2a2a4a;text-align:center}
+    .card .v{font-size:26px;font-weight:bold;color:#9146ff}
+    .card .l{color:#777;font-size:11px;margin-top:4px}
+    .card.g .v{color:#4caf50}
+    .card.o .v{color:#ff9800}
+    .sec{background:rgba(26,26,46,.95);border-radius:10px;padding:20px;margin-bottom:16px;border:1px solid #2a2a4a}
+    .sec h2{color:#9146ff;margin-bottom:12px;font-size:15px}
+    .btn{padding:8px 16px;border:none;border-radius:6px;cursor:pointer;font-size:13px;color:#fff;transition:all .2s}
+    .btn-go{background:#4caf50}.btn-go:hover{background:#388e3c}
+    .btn-stop{background:#f44336}.btn-stop:hover{background:#d32f2f}
+    .btn-pri{background:#9146ff}.btn-pri:hover{background:#7c3aed}
+    .btn-warn{background:#ff9800}
+    .btn-sm{padding:4px 10px;font-size:11px}
+    .btn-group{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+    input,textarea,select{padding:8px 12px;border:1px solid #333;border-radius:6px;background:#16213e;color:#fff;font-size:13px;outline:none}
+    input:focus,textarea:focus{border-color:#9146ff}
+    textarea{width:100%;min-height:70px;font-family:monospace}
+    .row{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}
+    .row label{color:#aaa;min-width:130px;font-size:13px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th{background:#16213e;color:#9146ff;padding:10px 8px;text-align:left}
+    td{padding:8px;border-bottom:1px solid #1a1a2e}
+    .st{padding:2px 7px;border-radius:4px;font-size:11px}
+    .st-on{background:rgba(76,175,80,.2);color:#4caf50}
+    .st-off{background:rgba(158,158,158,.2);color:#9e9e9e}
+    .st-afk{background:rgba(255,152,0,.2);color:#ff9800}
+    .st-wait{background:rgba(33,150,243,.2);color:#2196f3}
+    .st-err{background:rgba(244,67,54,.2);color:#f44336}
+    .timer{color:#ff9800;font-size:11px;font-weight:bold}
+    .logs{max-height:250px;overflow-y:auto;font-family:monospace;font-size:11px;margin-top:10px}
+    .logs div{padding:3px 6px;border-bottom:1px solid #111}
+    .toast{position:fixed;bottom:20px;right:20px;background:#4caf50;color:#fff;padding:10px 20px;border-radius:8px;display:none;z-index:100;font-size:13px}
   </style>
 </head>
 <body>
-  <nav class="navbar">
-    <h1>🎮 Twitch Viewer Bot</h1>
-    <div class="nav-links">
-      <button class="active" onclick="showTab('dashboard')">📊 Дашборд</button>
-      <button onclick="showTab('accounts')">👥 Аккаунты</button>
-      <button onclick="showTab('queue')">📥 Очередь</button>
-      <button onclick="showTab('cycle')">🔄 Цикл</button>
-      <button onclick="showTab('chat')">💬 Чат</button>
-      <button onclick="showTab('settings')">⚙️ Настройки</button>
-      <button onclick="showTab('logs')">📋 Логи</button>
-    </div>
-  </nav>
-  <div class="container">
-    <!-- ДАШБОРД -->
-    <div class="tabs active" id="tab-dashboard">
-      <div class="stats-grid">
-        <div class="stat-card green"><div class="value" id="st-connected">0</div><div class="label">Подключено</div></div>
-        <div class="stat-card"><div class="value" id="st-total">0</div><div class="label">Всего</div></div>
-        <div class="stat-card orange"><div class="value" id="st-disconnected">0</div><div class="label">Отключено</div></div>
-        <div class="stat-card red"><div class="value" id="st-errors">0</div><div class="label">Ошибки</div></div>
-        <div class="stat-card blue"><div class="value" id="st-cycling">0</div><div class="label">В цикле</div></div>
-      </div>
-      <div class="section">
-        <h2>🎯 Быстрые действия</h2>
-        <div class="btn-group">
-          <button class="btn btn-success" onclick="action('connect-all')">▶ Подключить всех</button>
-          <button class="btn btn-danger" onclick="action('disconnect-all')">⏹ Отключить всех</button>
-          <button class="btn btn-warning" onclick="action('reconnect-all')">🔄 Переподключить</button>
-          <button class="btn btn-pink" onclick="action('follow-all')">❤️ Зафолловить всех</button>
-        </div>
-      </div>
-      <div class="section">
-        <h2>📺 Канал</h2>
-        <div class="form-row">
-          <input id="dash-channel" placeholder="название канала" style="flex:1">
-          <button class="btn btn-primary" onclick="saveChannel()">Сохранить</button>
-        </div>
-      </div>
-    </div>
+<div class="top">
+  <h1><span class="status-dot off" id="dot"></span>Twitch Viewer Bot</h1>
+  <span id="run-label" style="color:#888;font-size:13px">Остановлен</span>
+</div>
+<div class="wrap">
+  <div class="cards">
+    <div class="card g"><div class="v" id="s-on">0</div><div class="l">Смотрят</div></div>
+    <div class="card o"><div class="v" id="s-afk">0</div><div class="l">АФК</div></div>
+    <div class="card"><div class="v" id="s-wait">0</div><div class="l">Ожидание</div></div>
+    <div class="card"><div class="v" id="s-total">0</div><div class="l">Всего</div></div>
+  </div>
 
-    <!-- АККАУНТЫ -->
-    <div class="tabs" id="tab-accounts">
-      <div class="section">
-        <h2>➕ Добавить аккаунты</h2>
-        <p style="color:#666;margin-bottom:8px;font-size:12px;">LOGIN:PASS:TOKEN:ID:DATE (каждый с новой строки или через |)</p>
-        <textarea id="new-accounts" placeholder="login1:pass1:token1:id1:date1"></textarea>
-        <div class="btn-group"><button class="btn btn-success" onclick="addAccounts()">➕ Добавить</button></div>
-      </div>
-      <div class="section">
-        <h2>👥 Список</h2>
-        <div class="table-wrap"><table><thead><tr><th>#</th><th>Логин</th><th>Статус</th><th>Фаза</th><th>Таймер</th><th>Смотрит/АФК</th><th>Действия</th></tr></thead><tbody id="accounts-table"></tbody></table></div>
-      </div>
+  <!-- Управление -->
+  <div class="sec">
+    <h2>🎮 Управление</h2>
+    <div class="row">
+      <label>Канал:</label>
+      <input id="channel" placeholder="название канала" style="flex:1">
+      <button class="btn btn-pri" onclick="saveSettings()">Сохранить</button>
     </div>
-
-    <!-- ОЧЕРЕДЬ -->
-    <div class="tabs" id="tab-queue">
-      <div class="section">
-        <h2>📥 Очередь захода/выхода</h2>
-        <p style="color:#888;margin-bottom:15px;font-size:13px;">Аккаунты заходят/выходят по одному через интервал в рандомном порядке.</p>
-        <div class="form-row"><label>Интервал захода:</label><input id="q-join-interval" type="number" value="2" min="1" style="width:60px"> мин</div>
-        <div class="form-row"><label>Интервал выхода:</label><input id="q-leave-interval" type="number" value="2" min="1" style="width:60px"> мин</div>
-        <div class="btn-group" style="margin-top:15px;">
-          <button class="btn btn-success" onclick="startQueue('join')">📥 Очередь ЗАХОДА</button>
-          <button class="btn btn-danger" onclick="startQueue('leave')">📤 Очередь ВЫХОДА</button>
-          <button class="btn btn-warning" onclick="stopQueues()">⏹ Остановить</button>
-        </div>
-        <p style="margin-top:10px;color:#888;font-size:12px;">В очереди: заход <b id="q-join-count">0</b> | выход <b id="q-leave-count">0</b></p>
-      </div>
+    <div class="row">
+      <label>Интервал захода:</label>
+      <input id="interval" type="number" value="3" min="1" style="width:60px"> мин (между каждым аккаунтом)
     </div>
-
-    <!-- ЦИКЛ -->
-    <div class="tabs" id="tab-cycle">
-      <div class="section">
-        <h2>🔄 Цикл заход/выход</h2>
-        <p style="color:#888;margin-bottom:15px;font-size:13px;">Каждый аккаунт: смотрит → АФК → возвращается → повтор.</p>
-        <div class="form-row"><label>Время просмотра:</label><input id="c-watch-time" type="number" value="20" min="1" style="width:60px"> мин</div>
-        <div class="form-row"><label>Время АФК:</label><input id="c-afk-time" type="number" value="10" min="1" style="width:60px"> мин</div>
-        <div class="btn-group" style="margin-top:15px;">
-          <button class="btn btn-success" onclick="startCycle()">▶ Запустить цикл</button>
-          <button class="btn btn-danger" onclick="stopCycle()">⏹ Остановить</button>
-        </div>
-      </div>
-      <div class="section">
-        <h2>⏱ Статус цикла</h2>
-        <div class="table-wrap"><table><thead><tr><th>Логин</th><th>Фаза</th><th>Осталось</th><th>Смотрит</th><th>АФК</th><th></th></tr></thead><tbody id="cycle-table"></tbody></table></div>
-      </div>
-    </div>
-
-    <!-- ЧАТ -->
-    <div class="tabs" id="tab-chat">
-      <div class="section">
-        <h2>💬 Отправить сообщение в чат</h2>
-        <p style="color:#888;margin-bottom:15px;font-size:13px;">Отправить сообщение от имени аккаунта в чат канала.</p>
-        <div class="chat-box">
-          <div class="form-row">
-            <label>Аккаунт:</label>
-            <select id="chat-account" style="flex:1"></select>
-          </div>
-          <div class="chat-input">
-            <input id="chat-message" placeholder="Введите сообщение..." style="flex:1">
-            <button class="btn btn-primary" onclick="sendChat()">Отправить</button>
-          </div>
-          <div style="margin-top:15px;border-top:1px solid #333;padding-top:15px;">
-            <p style="color:#aaa;font-size:13px;margin-bottom:8px;"><b>Отправить от ВСЕХ подключённых:</b></p>
-            <div class="chat-input">
-              <input id="chat-message-all" placeholder="Сообщение от всех..." style="flex:1">
-              <button class="btn btn-warning" onclick="sendChatAll()">Отправить от всех</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="section">
-        <h2>❤️ Фолловинг</h2>
-        <p style="color:#888;margin-bottom:10px;font-size:13px;">Зафолловить канал от имени аккаунтов. Требуется Client-ID в настройках.</p>
-        <div class="form-row">
-          <label>Аккаунт:</label>
-          <select id="follow-account" style="flex:1"></select>
-          <button class="btn btn-pink" onclick="followOne()">❤️ Зафолловить</button>
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-pink" onclick="action('follow-all')">❤️ Зафолловить ВСЕХ</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- НАСТРОЙКИ -->
-    <div class="tabs" id="tab-settings">
-      <div class="section">
-        <h2>⚙️ Настройки</h2>
-        <div class="form-row"><label>Канал:</label><input id="set-channel" placeholder="канал" style="flex:1"></div>
-        <div class="form-row"><label>Интервал захода (мин):</label><input id="set-queue-join" type="number" min="1" style="width:60px"></div>
-        <div class="form-row"><label>Интервал выхода (мин):</label><input id="set-queue-leave" type="number" min="1" style="width:60px"></div>
-        <div class="form-row"><label>Глоб. просмотр (мин):</label><input id="set-watch" type="number" min="1" style="width:60px"></div>
-        <div class="form-row"><label>Глоб. АФК (мин):</label><input id="set-afk" type="number" min="1" style="width:60px"></div>
-        <div class="form-row"><label>Twitch Client-ID:</label><input id="set-client-id" placeholder="для фолловинга" style="flex:1"></div>
-        <div class="btn-group"><button class="btn btn-primary" onclick="saveSettings()">💾 Сохранить</button></div>
-      </div>
-    </div>
-
-    <!-- ЛОГИ -->
-    <div class="tabs" id="tab-logs">
-      <div class="section">
-        <h2>📋 Логи</h2>
-        <button class="btn btn-sm btn-primary" onclick="loadLogs()">🔄 Обновить</button>
-        <div class="log-list" id="logs-list" style="margin-top:10px;"></div>
-      </div>
+    <div class="btn-group">
+      <button class="btn btn-go" onclick="doStart()">▶ СТАРТ</button>
+      <button class="btn btn-stop" onclick="doStop()">⏹ СТОП</button>
     </div>
   </div>
-  <div class="toast" id="toast"></div>
-</body>
-</html>
+
+  <!-- Аккаунты -->
+  <div class="sec">
+    <h2>👥 Аккаунты</h2>
+    <div class="table-wrap" style="overflow-x:auto">
+      <table><thead><tr><th>#</th><th>Логин</th><th>Статус</th><th>Фаза</th><th>Таймер</th><th></th></tr></thead>
+      <tbody id="tbl"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Добавить -->
+  <div class="sec">
+    <h2>➕ Добавить аккаунты</h2>
+    <textarea id="new-acc" placeholder="login:pass:token:id:date (каждый с новой строки или через |)"></textarea>
+    <div class="btn-group"><button class="btn btn-go" onclick="addAcc()">Добавить</button></div>
+  </div>
+
+  <!-- Чат -->
+  <div class="sec">
+    <h2>💬 Чат</h2>
+    <div class="row">
+      <select id="chat-acc" style="flex:1"></select>
+      <input id="chat-msg" placeholder="Сообщение" style="flex:2">
+      <button class="btn btn-pri" onclick="sendChat()">Отправить</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input id="chat-all-msg" placeholder="Сообщение от ВСЕХ" style="flex:1">
+      <button class="btn btn-warn" onclick="sendChatAll()">От всех</button>
+    </div>
+  </div>
+
+  <!-- Логи -->
+  <div class="sec">
+    <h2>📋 Логи</h2>
+    <div class="logs" id="logs"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
 
 <script>
-  const pass = localStorage.getItem("pass") || new URLSearchParams(window.location.search).get("pass") || "";
-  if (!pass) window.location.href = "/";
+const pass = localStorage.getItem("pass") || new URLSearchParams(location.search).get("pass") || "";
+if (!pass) location.href = "/";
 
-  async function api(url, data = null) {
-    const opts = { headers: { "x-pass": pass } };
-    if (data) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(data); }
-    const res = await fetch(url, opts);
-    return res.json();
-  }
+async function api(url, data) {
+  const o = { headers: { "x-pass": pass } };
+  if (data) { o.method = "POST"; o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(data); }
+  return (await fetch(url, o)).json();
+}
+function toast(m) { const t = document.getElementById("toast"); t.textContent = m; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2500); }
+function fmt(s) { if (!s || s <= 0) return "—"; const m = Math.floor(s/60), sec = s%60; return m > 0 ? m+"м "+sec+"с" : sec+"с"; }
 
-  function toast(msg, color = "#4caf50") {
-    const el = document.getElementById("toast");
-    el.textContent = msg; el.style.background = color; el.style.display = "block";
-    setTimeout(() => el.style.display = "none", 3000);
-  }
+async function load() {
+  const st = await api("/api/status");
+  document.getElementById("s-on").textContent = st.online;
+  document.getElementById("s-afk").textContent = st.afk;
+  document.getElementById("s-wait").textContent = st.waiting;
+  document.getElementById("s-total").textContent = st.total;
+  document.getElementById("channel").value = st.channel || "";
+  document.getElementById("interval").value = st.join_interval || "3";
+  document.getElementById("dot").className = "status-dot " + (st.running ? "on" : "off");
+  document.getElementById("run-label").textContent = st.running ? "Работает" : "Остановлен";
+  document.getElementById("run-label").style.color = st.running ? "#4caf50" : "#888";
 
-  function showTab(name) {
-    document.querySelectorAll(".tabs").forEach(t => t.classList.remove("active"));
-    document.getElementById("tab-" + name).classList.add("active");
-    document.querySelectorAll(".nav-links button").forEach(b => b.classList.remove("active"));
-    event.target.classList.add("active");
-    if (name === "accounts") loadAccounts();
-    if (name === "cycle") loadCycle();
-    if (name === "chat") loadChatAccounts();
-    if (name === "logs") loadLogs();
-  }
+  const accs = await api("/api/accounts");
+  document.getElementById("tbl").innerHTML = accs.map((a,i) => {
+    const sc = a.status==="online"?"st-on":a.status==="афк"?"st-afk":a.status==="ожидание"?"st-wait":a.status==="error"?"st-err":"st-off";
+    const ph = a.phase==="watching"?"👀 Смотрит":a.phase==="afk"?"💤 АФК":a.phase==="waiting_join"?"⏳ Ожидает":"—";
+    return `<tr><td>${i+1}</td><td><b>${a.login}</b></td><td><span class="st ${sc}">${a.status}</span></td><td>${ph}</td><td class="timer">${fmt(a.time_left)}</td><td><button class="btn btn-sm btn-stop" onclick="delAcc(${a.id})">🗑</button></td></tr>`;
+  }).join("");
 
-  function formatTime(seconds) {
-    if (!seconds || seconds <= 0) return "—";
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return m > 0 ? `${m}м ${s}с` : `${s}с`;
-  }
+  // Чат select
+  const online = accs.filter(a => a.status === "online");
+  document.getElementById("chat-acc").innerHTML = online.map(a => `<option value="${a.id}">${a.login}</option>`).join("") || '<option>—</option>';
+}
 
-  async function loadStatus() {
-    const data = await api("/api/status");
-    document.getElementById("st-connected").textContent = data.connected;
-    document.getElementById("st-total").textContent = data.total;
-    document.getElementById("st-disconnected").textContent = data.disconnected;
-    document.getElementById("st-errors").textContent = data.errors;
-    document.getElementById("st-cycling").textContent = data.cycling;
-    document.getElementById("dash-channel").value = data.settings.channel || "";
-    document.getElementById("set-channel").value = data.settings.channel || "";
-    document.getElementById("set-queue-join").value = data.settings.queue_join_interval || "2";
-    document.getElementById("set-queue-leave").value = data.settings.queue_leave_interval || "2";
-    document.getElementById("set-watch").value = data.settings.global_watch_time || "20";
-    document.getElementById("set-afk").value = data.settings.global_afk_time || "10";
-    document.getElementById("set-client-id").value = data.settings.client_id || "";
-    document.getElementById("c-watch-time").value = data.settings.global_watch_time || "20";
-    document.getElementById("c-afk-time").value = data.settings.global_afk_time || "10";
-    document.getElementById("q-join-interval").value = data.settings.queue_join_interval || "2";
-    document.getElementById("q-leave-interval").value = data.settings.queue_leave_interval || "2";
-    document.getElementById("q-join-count").textContent = data.queue.joinQueue;
-    document.getElementById("q-leave-count").textContent = data.queue.leaveQueue;
-  }
+async function loadLogs() {
+  const logs = await api("/api/logs");
+  document.getElementById("logs").innerHTML = logs.map(l => `<div><span style="color:#555">${l.created_at}</span> [${l.type}] ${l.message}</div>`).join("");
+}
 
-  async function loadAccounts() {
-    const accounts = await api("/api/accounts");
-    const tbody = document.getElementById("accounts-table");
-    tbody.innerHTML = accounts.map((a, i) => {
-      const sc = a.status === "подключен" ? "status-online" : a.status.includes("ошибка") ? "status-error" : a.status.includes("подключение") ? "status-connecting" : "status-offline";
-      const phaseText = a.current_phase === "watching" ? "👀 Смотрит" : a.current_phase === "afk" ? "💤 АФК" : a.current_phase === "joining" ? "📥 Заходит" : "—";
-      const phaseClass = a.current_phase === "watching" ? "status-watching" : a.current_phase === "afk" ? "status-afk" : "";
-      return `<tr>
-        <td>${i+1}</td>
-        <td><b>${a.login}</b></td>
-        <td><span class="status ${sc}">${a.status}</span></td>
-        <td><span class="status ${phaseClass}">${phaseText}</span></td>
-        <td class="timer-badge">${formatTime(a.time_left)}</td>
-        <td><input type="number" value="${a.watch_time}" style="width:40px" onchange="setTimes(${a.id},this.value,this.parentElement.querySelectorAll('input')[1].value)">/<input type="number" value="${a.afk_time}" style="width:40px" onchange="setTimes(${a.id},this.parentElement.querySelectorAll('input')[0].value,this.value)"></td>
-        <td>
-          <button class="btn btn-sm btn-success" onclick="connectOne(${a.id})">▶</button>
-          <button class="btn btn-sm btn-danger" onclick="disconnectOne(${a.id})">⏹</button>
-          <button class="btn btn-sm btn-primary" onclick="startCycleOne(${a.id})">🔄</button>
-          <button class="btn btn-sm btn-warning" onclick="stopCycleOne(${a.id})">⏸</button>
-          <button class="btn btn-sm btn-pink" onclick="followAcc(${a.id})">❤️</button>
-          <button class="btn btn-sm btn-danger" onclick="deleteAcc(${a.id})">🗑</button>
-        </td>
-      </tr>`;
-    }).join("");
-  }
+async function doStart() {
+  await api("/api/settings", { channel: document.getElementById("channel").value, join_interval: document.getElementById("interval").value });
+  await api("/api/start", {});
+  toast("Запущено!"); setTimeout(load, 1000);
+}
+async function doStop() { await api("/api/stop", {}); toast("Остановлено"); setTimeout(load, 1000); }
+async function saveSettings() { await api("/api/settings", { channel: document.getElementById("channel").value, join_interval: document.getElementById("interval").value }); toast("Сохранено"); }
+async function addAcc() { const t = document.getElementById("new-acc").value; if (!t.trim()) return; const r = await api("/api/accounts/add", { accounts: t }); toast("Добавлено: " + r.added); document.getElementById("new-acc").value = ""; load(); }
+async function delAcc(id) { if (!confirm("Удалить?")) return; await api("/api/accounts/delete", { id }); load(); }
+async function sendChat() { const id = +document.getElementById("chat-acc").value; const m = document.getElementById("chat-msg").value; if (!m) return; const r = await api("/api/chat/send", { id, message: m }); toast(r.ok ? "Отправлено" : r.error); document.getElementById("chat-msg").value = ""; }
+async function sendChatAll() { const m = document.getElementById("chat-all-msg").value; if (!m) return; const r = await api("/api/chat/send-all", { message: m }); toast("Отправляется: " + r.count); document.getElementById("chat-all-msg").value = ""; }
 
-  async function loadCycle() {
-    const accounts = await api("/api/accounts");
-    const cycling = accounts.filter(a => a.cycle_active);
-    const tbody = document.getElementById("cycle-table");
-    tbody.innerHTML = cycling.map(a => {
-      const ph = a.current_phase === "watching" ? "👀 Смотрит" : a.current_phase === "afk" ? "💤 АФК" : "📥 Заходит";
-      return `<tr><td><b>${a.login}</b></td><td>${ph}</td><td class="timer-badge">${formatTime(a.time_left)}</td><td>${a.watch_time}м</td><td>${a.afk_time}м</td><td><button class="btn btn-sm btn-danger" onclick="stopCycleOne(${a.id})">⏹</button></td></tr>`;
-    }).join("") || '<tr><td colspan="6" style="text-align:center;color:#666;">Нет аккаунтов в цикле</td></tr>';
-  }
+document.getElementById("chat-msg").onkeypress = e => { if (e.key==="Enter") sendChat(); };
+document.getElementById("chat-all-msg").onkeypress = e => { if (e.key==="Enter") sendChatAll(); };
 
-  async function loadChatAccounts() {
-    const accounts = await api("/api/accounts");
-    const connected = accounts.filter(a => a.status === "подключен");
-    const sel1 = document.getElementById("chat-account");
-    const sel2 = document.getElementById("follow-account");
-    const opts = connected.map(a => `<option value="${a.id}">${a.login}</option>`).join("");
-    const optsAll = accounts.map(a => `<option value="${a.id}">${a.login} (${a.status})</option>`).join("");
-    sel1.innerHTML = opts || '<option>Нет подключённых</option>';
-    sel2.innerHTML = optsAll || '<option>Нет аккаунтов</option>';
-  }
-
-  async function loadLogs() {
-    const logs = await api("/api/logs");
-    document.getElementById("logs-list").innerHTML = logs.map(l =>
-      `<div class="log-item"><span class="time">${l.created_at}</span> [${l.type}] ${l.message}</div>`
-    ).join("");
-  }
-
-  // Действия
-  async function action(name) { await api("/api/action/" + name, {}); toast("Выполнено!"); setTimeout(loadStatus, 2000); }
-  async function saveChannel() { await api("/api/settings", { channel: document.getElementById("dash-channel").value }); toast("Канал сохранён!"); loadStatus(); }
-
-  async function saveSettings() {
-    await api("/api/settings", {
-      channel: document.getElementById("set-channel").value,
-      queue_join_interval: document.getElementById("set-queue-join").value,
-      queue_leave_interval: document.getElementById("set-queue-leave").value,
-      global_watch_time: document.getElementById("set-watch").value,
-      global_afk_time: document.getElementById("set-afk").value,
-      client_id: document.getElementById("set-client-id").value,
-    });
-    toast("Сохранено!");
-  }
-
-  async function addAccounts() {
-    const text = document.getElementById("new-accounts").value;
-    if (!text.trim()) return;
-    const res = await api("/api/accounts/add", { accounts: text });
-    toast(`Добавлено: ${res.added}`); document.getElementById("new-accounts").value = ""; loadAccounts(); loadStatus();
-  }
-
-  async function connectOne(id) { await api("/api/accounts/connect", { id }); toast("Подключение..."); setTimeout(loadAccounts, 3000); }
-  async function disconnectOne(id) { await api("/api/accounts/disconnect", { id }); toast("Отключен"); loadAccounts(); }
-  async function deleteAcc(id) { if (!confirm("Удалить?")) return; await api("/api/accounts/delete", { id }); toast("Удалён","#f44336"); loadAccounts(); loadStatus(); }
-  async function followAcc(id) { const r = await api("/api/accounts/follow", { id }); toast(r.ok ? "Зафолловлен!" : r.error, r.ok ? "#e91e63" : "#f44336"); }
-
-  async function setTimes(id, watch, afk) {
-    await api("/api/accounts/set-times", { id, watch_time: parseInt(watch)||20, afk_time: parseInt(afk)||10 });
-    toast("Время обновлено");
-  }
-
-  async function startCycleOne(id) { await api("/api/accounts/start-cycle", { id }); toast("Цикл запущен"); loadAccounts(); }
-  async function stopCycleOne(id) { await api("/api/accounts/stop-cycle", { id }); toast("Цикл стоп"); loadAccounts(); }
-
-  async function startQueue(type) {
-    await api("/api/settings", { queue_join_interval: document.getElementById("q-join-interval").value, queue_leave_interval: document.getElementById("q-leave-interval").value });
-    await api("/api/queue/start-" + type, {});
-    toast("Очередь запущена!");
-  }
-  async function stopQueues() { await api("/api/queue/stop", {}); toast("Остановлено"); }
-
-  async function startCycle() {
-    await api("/api/settings", { global_watch_time: document.getElementById("c-watch-time").value, global_afk_time: document.getElementById("c-afk-time").value });
-    await api("/api/cycle/start", {});
-    toast("Цикл запущен!"); setTimeout(loadCycle, 2000);
-  }
-  async function stopCycle() { await api("/api/cycle/stop", {}); toast("Цикл стоп"); loadCycle(); }
-
-  // ЧАТ
-  async function sendChat() {
-    const id = parseInt(document.getElementById("chat-account").value);
-    const message = document.getElementById("chat-message").value;
-    if (!message) return;
-    const r = await api("/api/chat/send", { id, message });
-    if (r.ok) { toast("Отправлено!"); document.getElementById("chat-message").value = ""; }
-    else toast(r.error, "#f44336");
-  }
-
-  async function sendChatAll() {
-    const message = document.getElementById("chat-message-all").value;
-    if (!message) return;
-    const r = await api("/api/chat/send-all", { message });
-    toast(`Отправляется ${r.sending} аккаунтам`);
-    document.getElementById("chat-message-all").value = "";
-  }
-
-  async function followOne() {
-    const id = parseInt(document.getElementById("follow-account").value);
-    const r = await api("/api/accounts/follow", { id });
-    toast(r.ok ? "Зафолловлен!" : r.error, r.ok ? "#e91e63" : "#f44336");
-  }
-
-  // Enter для отправки
-  document.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("chat-message").addEventListener("keypress", e => { if (e.key === "Enter") sendChat(); });
-    document.getElementById("chat-message-all").addEventListener("keypress", e => { if (e.key === "Enter") sendChatAll(); });
-  });
-
-  // Инициализация
-  loadStatus();
-  setInterval(loadStatus, 8000);
-  setInterval(() => { if (document.getElementById("tab-accounts").classList.contains("active")) loadAccounts(); }, 10000);
-  setInterval(() => { if (document.getElementById("tab-cycle").classList.contains("active")) loadCycle(); }, 10000);
+load(); loadLogs();
+setInterval(load, 8000);
+setInterval(loadLogs, 15000);
 </script>
+</body>
+</html>

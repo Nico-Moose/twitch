@@ -1,7 +1,7 @@
 const express = require("express");
 const path = require("path");
 const db = require("./src/database");
-const twitchManager = require("./src/twitch-manager");
+const bot = require("./src/bot");
 const apiRoutes = require("./src/api");
 
 const PORT = process.env.PORT || 3000;
@@ -16,7 +16,7 @@ if (ACCOUNTS_RAW && db.getAccountCount() === 0) {
       db.addAccount(parts[0], parts[2]);
     }
   });
-  console.log("[DB] Аккаунты импортированы из ENV");
+  console.log("[DB] Импортировано аккаунтов: " + db.getAccountCount());
 }
 
 // Канал из ENV
@@ -28,41 +28,29 @@ if (ENV_CHANNEL && !db.getSetting("channel")) {
 // Express
 const app = express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Авторизация
+// Авторизация API
 app.use("/api", (req, res, next) => {
   const pass = req.headers["x-pass"] || req.query.pass;
   if (pass === ADMIN_PASS) return next();
   res.status(401).json({ error: "Unauthorized" });
 });
 
-app.use("/admin", (req, res, next) => {
-  const pass = req.query.pass || "";
-  if (pass === ADMIN_PASS) return next();
-  res.sendFile(path.join(__dirname, "public", "login.html"));
-});
-
-// API
 app.use("/api", apiRoutes);
 
-// Админка
 app.get("/admin", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "admin.html"));
+  const pass = req.query.pass || "";
+  if (pass === ADMIN_PASS) return res.sendFile(path.join(__dirname, "public", "admin.html"));
+  res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-// Запуск
 app.listen(PORT, () => {
-  console.log(`[HTTP] Панель: порт ${PORT}`);
+  console.log(`[HTTP] Порт ${PORT}`);
   console.log(`[INFO] Пароль: ${ADMIN_PASS}`);
-
-  // Автоподключение
-  setTimeout(() => {
-    twitchManager.connectAll();
-  }, 2000);
+  console.log(`[INFO] Канал: ${db.getSetting("channel") || "не задан"}`);
 });

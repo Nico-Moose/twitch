@@ -1,6 +1,6 @@
 {
   "name": "twitch-viewer-bot",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "Twitch viewer bot with admin panel",
   "main": "index.js",
   "scripts": {
