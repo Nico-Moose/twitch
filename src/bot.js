@@ -250,6 +250,7 @@ function startHLS(account) {
 
     let errorCount = 0;
     let lastSegment = "";
+    let segmentCounter = 0;
 
     const timer = setInterval(() => {
       httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
@@ -270,17 +271,20 @@ function startHLS(account) {
           if (line && !line.startsWith("#")) { newestSegment = line; break; }
         }
 
-        // Качаем каждый новый сегмент по 1 КБ через Range —
-        // Twitch засчитывает зрителя именно по запросам сегментов.
+        // Качаем каждый 2-й новый сегмент по 512 байт через Range.
+        // Twitch засчитывает зрителя по запросам сегментов.
         if (newestSegment && newestSegment !== lastSegment) {
           lastSegment = newestSegment;
-          downloadSegment(newestSegment, agent);
+          segmentCounter++;
+          if (segmentCounter % 2 === 0) {
+            downloadSegment(newestSegment, agent);
+          }
         }
       }).catch(() => {
         errorCount++;
         if (errorCount >= 5) stopHLS(account.id);
       });
-    }, 10000); // refresh плейлиста каждые 10 сек
+    }, 15000); // refresh плейлиста каждые 15 сек
 
     watchers.set(account.id, { timer });
   }).catch(err => {
@@ -310,15 +314,15 @@ function downloadSegment(url, agent) {
       path: opts.pathname + opts.search,
       method: "GET",
       timeout: 8000,
-      // Range: 0-1023 — просим только первый КБ. Twitch отдаёт 206 Partial Content,
+      // Range: 0-511 — просим только первые 512 байт. Twitch отдаёт 206 Partial Content,
       // зритель засчитывается, а трафик минимален.
-      headers: { "Range": "bytes=0-1023", "Connection": "close" },
+      headers: { "Range": "bytes=0-511", "Connection": "close" },
     };
     if (agent) reqOpts.agent = agent;
 
     const req = https.request(reqOpts, (res) => {
       let bytes = 0;
-      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 1024) res.destroy(); });
+      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 512) res.destroy(); });
       res.on("end", () => {});
       res.on("error", () => {});
     });
