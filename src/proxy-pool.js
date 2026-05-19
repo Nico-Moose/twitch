@@ -43,7 +43,7 @@ function checkProxy(proxy) {
         path: "/gql",
         method: "POST",
         agent: agent,
-        timeout: 5000,
+        timeout: 3000,
         headers: {
           "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
           "Content-Type": "application/json",
@@ -74,41 +74,37 @@ function checkProxy(proxy) {
 }
 
 // Проверить пачку прокси и отобрать рабочие
-async function checkAll(batchSize = 200) {
+async function checkAll() {
   if (checking) return;
   checking = true;
 
-  console.log(`[PROXY] Проверяем ${proxyList.length} прокси (пачки по ${batchSize})...`);
+  const batchSize = 100;
+  console.log(`[PROXY] Проверяем ${proxyList.length} прокси...`);
   db.addLog("proxy", `Проверка ${proxyList.length} прокси...`);
 
   goodProxies = [];
+  badProxies.clear();
   let checked = 0;
 
-  // Проверяем пачками
   for (let i = 0; i < proxyList.length; i += batchSize) {
     const batch = proxyList.slice(i, i + batchSize);
-    const results = await Promise.all(batch.map(async (proxy) => {
-      const ok = await checkProxy(proxy);
-      return { proxy, ok };
-    }));
+    const results = await Promise.all(batch.map(proxy => checkProxy(proxy)));
 
-    results.forEach(r => {
-      if (r.ok) {
-        goodProxies.push(r.proxy);
+    batch.forEach((proxy, idx) => {
+      if (results[idx]) {
+        goodProxies.push(proxy);
       } else {
-        badProxies.add(r.proxy);
+        badProxies.add(proxy);
       }
     });
 
     checked += batch.length;
-    if (checked % 500 === 0 || checked === proxyList.length) {
-      console.log(`[PROXY] ${checked}/${proxyList.length} | рабочих: ${goodProxies.length}`);
-    }
+    console.log(`[PROXY] ${checked}/${proxyList.length} | good: ${goodProxies.length}`);
   }
 
   checking = false;
-  console.log(`[PROXY] Готово. Рабочих: ${goodProxies.length} из ${proxyList.length}`);
-  db.addLog("proxy", `Рабочих: ${goodProxies.length} из ${proxyList.length}`);
+  console.log(`[PROXY] Готово. Рабочих: ${goodProxies.length}/${proxyList.length}`);
+  db.addLog("proxy", `Рабочих: ${goodProxies.length}/${proxyList.length}`);
   return goodProxies.length;
 }
 
