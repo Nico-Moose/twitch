@@ -194,13 +194,16 @@ function followChannel(account) {
 
 function getUserId(login, token) {
   return new Promise((resolve) => {
+    const clientId = db.getSetting("client_id") || "";
+    
+    // Пробуем сначала с токеном аккаунта
     const options = {
       hostname: "api.twitch.tv",
-      path: `/helix/users?login=${login}`,
+      path: `/helix/users?login=${encodeURIComponent(login)}`,
       method: "GET",
       headers: {
         "Authorization": "Bearer " + token,
-        "Client-Id": db.getSetting("client_id") || "",
+        "Client-Id": clientId,
       }
     };
 
@@ -213,15 +216,20 @@ function getUserId(login, token) {
           if (data.data && data.data[0]) {
             resolve(data.data[0].id);
           } else {
+            console.log(`[FOLLOW] getUserId ответ: ${body}`);
             resolve(null);
           }
         } catch (e) {
+          console.log(`[FOLLOW] getUserId parse error: ${body}`);
           resolve(null);
         }
       });
     });
 
-    req.on("error", () => resolve(null));
+    req.on("error", (err) => {
+      console.log(`[FOLLOW] getUserId network error: ${err.message}`);
+      resolve(null);
+    });
     req.end();
   });
 }
