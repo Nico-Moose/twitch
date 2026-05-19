@@ -5,7 +5,24 @@ const fs = require("fs");
 const dataDir = path.join(__dirname, "..", "data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new Database(path.join(dataDir, "bot.db"));
+const dbPath = path.join(dataDir, "bot.db");
+
+// Удаляем старую базу если она не содержит нужных колонок
+if (fs.existsSync(dbPath)) {
+  try {
+    const testDb = new Database(dbPath);
+    const cols = testDb.prepare("PRAGMA table_info(accounts)").all().map(c => c.name);
+    testDb.close();
+    if (!cols.includes("status")) {
+      fs.unlinkSync(dbPath);
+      console.log("[DB] Старая база удалена, создаём новую");
+    }
+  } catch (e) {
+    fs.unlinkSync(dbPath);
+  }
+}
+
+const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 
 db.exec(`
@@ -36,12 +53,22 @@ db.exec(`
   );
 `);
 
-// Добавляем новые колонки если их нет (миграция)
-try { db.exec("ALTER TABLE accounts ADD COLUMN watch_time INTEGER DEFAULT 20"); } catch(e) {}
-try { db.exec("ALTER TABLE accounts ADD COLUMN afk_time INTEGER DEFAULT 10"); } catch(e) {}
-try { db.exec("ALTER TABLE accounts ADD COLUMN cycle_active INTEGER DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE accounts ADD COLUMN next_action_at INTEGER DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE accounts ADD COLUMN current_phase TEXT DEFAULT 'idle'"); } catch(e) {}
+// Миграция: добавляем колонки если их нет
+const columns = db.prepare("PRAGMA table_info(accounts)").all().map(c => c.name);
+const migrations = [
+  { name: "status", sql: "ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'отключен'" },
+  { name: "watch_time", sql: "ALTER TABLE accounts ADD COLUMN watch_time INTEGER DEFAULT 20" },
+  { name: "afk_time", sql: "ALTER TABLE accounts ADD COLUMN afk_time INTEGER DEFAULT 10" },
+  { name: "cycle_active", sql: "ALTER TABLE accounts ADD COLUMN cycle_active INTEGER DEFAULT 0" },
+  { name: "next_action_at", sql: "ALTER TABLE accounts ADD COLUMN next_action_at INTEGER DEFAULT 0" },
+  { name: "current_phase", sql: "ALTER TABLE accounts ADD COLUMN current_phase TEXT DEFAULT 'idle'" },
+];
+migrations.forEach(m => {
+  if (!columns.includes(m.name)) {
+    db.exec(m.sql);
+    console.log(`[DB] Миграция: добавлена колонка ${m.name}`);
+  }
+});
 
 const defaults = {
   channel: "",
