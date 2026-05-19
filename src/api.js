@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const db = require("./database");
 const bot = require("./bot");
+const proxyPool = require("./proxy-pool");
 
 // Статус
 router.get("/status", (req, res) => {
@@ -82,6 +83,35 @@ router.post("/proxy/bulk", (req, res) => {
   db.setProxyBulk(list);
   db.addLog("system", `Прокси назначены: ${list.length}`);
   res.json({ ok: true, count: list.length });
+});
+
+// Загрузить прокси в пул
+router.post("/proxy/load", (req, res) => {
+  const { proxies } = req.body;
+  if (!proxies) return res.json({ ok: false });
+  const count = proxyPool.loadProxies(proxies);
+  res.json({ ok: true, loaded: count });
+});
+
+// Проверить все прокси
+router.post("/proxy/check", (req, res) => {
+  const stats = proxyPool.getStats();
+  if (stats.checking) {
+    return res.json({ ok: true, message: "Уже проверяется" });
+  }
+  proxyPool.checkAll();
+  res.json({ ok: true, message: "Проверка запущена" });
+});
+
+// Назначить рабочие прокси аккаунтам
+router.post("/proxy/assign", (req, res) => {
+  const count = proxyPool.assignToAccounts();
+  res.json({ ok: true, assigned: count });
+});
+
+// Статус прокси
+router.get("/proxy/stats", (req, res) => {
+  res.json(proxyPool.getStats());
 });
 
 // Старт/Стоп

@@ -1,0 +1,152 @@
+const https = require("https");
+const { HttpsProxyAgent } = require("https-proxy-agent");
+const db = require("./database");
+
+let proxyList = []; // все загруженные прокси
+let goodProxies = []; // рабочие прокси
+let badProxies = new Set(); // забаненные/мёртвые
+let checking = false;
+
+// Загрузить список прокси (из текста)
+function loadProxies(text) {
+  const lines = text.replace(/\|/g, "\n").split("\n").map(l => l.trim()).filter(l => l && l.includes(":"));
+  proxyList = lines;
+  badProxies.clear();
+  goodProxies = [];
+  db.addLog("proxy", `Загружено ${lines.length} прокси`);
+  console.log(`[PROXY] Загружено ${lines.length} прокси`);
+  return lines.length;
+}
+
+// Проверить один прокси (пытаемся подключиться к Twitch)
+function checkProxy(proxy) {
+  return new Promise((resolve) => {
+    try {
+      const parts = proxy.split(":");
+      const host = parts[0];
+      const port = parts[1];
+      const user = parts[2] || null;
+      const pass = parts[3] || null;
+
+      const auth = user ? `${user}:${pass}@` : "";
+      const url = `http://${auth}${host}:${port}`;
+      const agent = new HttpsProxyAgent(url);
+
+      const req = https.request({
+        hostname: "gql.twitch.tv",
+        path: "/gql",
+        method: "POST",
+        agent: agent,
+        timeout: 8000,
+        headers: {
+          "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+          "Content-Type": "application/json",
+        }
+      }, (res) => {
+        let data = "";
+        res.on("data", chunk => data += chunk);
+        res.on("end", () => {
+          // Если получили ответ от Twitch — прокси рабочий
+          resolve(res.statusCode < 500);
+        });
+      });
+
+      req.on("error", () => resolve(false));
+      req.on("timeout", () => { req.destroy(); resolve(false); });
+      req.write(JSON.stringify({ query: "{}" }));
+      req.end();
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
+
+// Проверить пачку прокси и отобрать рабочие
+async function checkAll(batchSize = 50) {
+  if (checking) return;
+  checking = true;
+
+  console.log(`[PROXY] Проверяем ${proxyList.length} прокси...`);
+  db.addLog("proxy", `Проверка ${proxyList.length} прокси...`);
+
+  goodProxies = [];
+  let checked = 0;
+
+  // Проверяем пачками
+  for (let i = 0; i < proxyList.length; i += batchSize) {
+    const batch = proxyList.slice(i, i + batchSize);
+    const results = await Promise.all(batch.map(async (proxy) => {
+      const ok = await checkProxy(proxy);
+      return { proxy, ok };
+    }));
+
+    results.forEach(r => {
+      if (r.ok) {
+        goodProxies.push(r.proxy);
+      } else {
+        badProxies.add(r.proxy);
+      }
+    });
+
+    checked += batch.length;
+    if (checked % 200 === 0) {
+      console.log(`[PROXY] Проверено ${checked}/${proxyList.length}, рабочих: ${goodProxies.length}`);
+    }
+  }
+
+  checking = false;
+  console.log(`[PROXY] Готово. Рабочих: ${goodProxies.length} из ${proxyList.length}`);
+  db.addLog("proxy", `Рабочих: ${goodProxies.length} из ${proxyList.length}`);
+  return goodProxies.length;
+}
+
+// Получить рабочий прокси для аккаунта (рандомный из пула)
+function getProxy(accountId) {
+  if (goodProxies.length === 0) return null;
+  // Каждому аккаунту свой прокси (по индексу)
+  const index = accountId % goodProxies.length;
+  return goodProxies[index];
+}
+
+// Пометить прокси как нерабочий и заменить
+function markBad(proxy) {
+  badProxies.add(proxy);
+  goodProxies = goodProxies.filter(p => p !== proxy);
+  console.log(`[PROXY] ${proxy} помечен как нерабочий. Осталось: ${goodProxies.length}`);
+}
+
+// Назначить прокси аккаунтам из пула рабочих
+function assignToAccounts() {
+  const accounts = db.getAccounts();
+  accounts.forEach((acc, i) => {
+    if (goodProxies[i]) {
+      db.setProxy(acc.id, goodProxies[i]);
+    }
+  });
+  db.addLog("proxy", `Назначено ${Math.min(accounts.length, goodProxies.length)} прокси`);
+  return Math.min(accounts.length, goodProxies.length);
+}
+
+function getStats() {
+  return {
+    total: proxyList.length,
+    good: goodProxies.length,
+    bad: badProxies.size,
+    checking: checking,
+  };
+}
+
+function getGoodProxies() {
+  return goodProxies;
+}
+
+module.exports = {
+  loadProxies,
+  checkProxy,
+  checkAll,
+  getProxy,
+  markBad,
+  assignToAccounts,
+  getStats,
+  getGoodProxies,
+};

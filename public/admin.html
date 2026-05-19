@@ -97,10 +97,20 @@
 
   <!-- Прокси -->
   <div class="sec">
-    <h2>🌐 Прокси</h2>
-    <p style="color:#888;margin-bottom:8px;font-size:12px;">Формат: ip:port:login:pass (каждый с новой строки). Назначаются по порядку аккаунтов.</p>
-    <textarea id="proxy-list" placeholder="1.2.3.4:8080:user:pass&#10;5.6.7.8:1080:user:pass"></textarea>
-    <div class="btn-group"><button class="btn btn-pri" onclick="setProxies()">Назначить прокси</button></div>
+    <h2>🌐 Прокси-пул</h2>
+    <p style="color:#888;margin-bottom:8px;font-size:12px;">Загрузите список прокси (ip:port или ip:port:login:pass). Бот сам проверит какие рабочие и назначит аккаунтам.</p>
+    <textarea id="proxy-list" placeholder="1.2.3.4:8080&#10;5.6.7.8:1080&#10;9.10.11.12:3128:user:pass" style="min-height:100px"></textarea>
+    <div class="btn-group">
+      <button class="btn btn-pri" onclick="loadProxies()">1. Загрузить</button>
+      <button class="btn btn-warn" onclick="checkProxies()">2. Проверить</button>
+      <button class="btn btn-go" onclick="assignProxies()">3. Назначить</button>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:#888;">
+      <span>Загружено: <b id="px-total">0</b></span> |
+      <span style="color:#4caf50">Рабочих: <b id="px-good">0</b></span> |
+      <span style="color:#f44336">Мёртвых: <b id="px-bad">0</b></span> |
+      <span id="px-status"></span>
+    </div>
   </div>
 
   <!-- Чат -->
@@ -178,6 +188,11 @@ async function addAcc() { const t = document.getElementById("new-acc").value; if
 async function delAcc(id) { if (!confirm("Удалить?")) return; await api("/api/accounts/delete", { id }); load(); }
 async function connectNow(id) { await api("/api/accounts/connect-now", { id }); toast("Запущен!"); setTimeout(load, 2000); }
 async function setProxies() { const t = document.getElementById("proxy-list").value; if (!t.trim()) return; const r = await api("/api/proxy/bulk", { proxies: t }); toast("Прокси назначены: " + r.count); load(); }
+async function loadProxies() { const t = document.getElementById("proxy-list").value; if (!t.trim()) return; const r = await api("/api/proxy/load", { proxies: t }); toast("Загружено: " + r.loaded); loadProxyStats(); }
+async function checkProxies() { await api("/api/proxy/check", {}); toast("Проверка запущена..."); document.getElementById("px-status").textContent = "⏳ проверяем..."; checkProxyLoop(); }
+async function assignProxies() { const r = await api("/api/proxy/assign", {}); toast("Назначено: " + r.assigned); load(); }
+async function loadProxyStats() { const s = await api("/api/proxy/stats"); document.getElementById("px-total").textContent = s.total; document.getElementById("px-good").textContent = s.good; document.getElementById("px-bad").textContent = s.bad; document.getElementById("px-status").textContent = s.checking ? "⏳ проверяем..." : ""; }
+function checkProxyLoop() { setTimeout(async () => { const s = await api("/api/proxy/stats"); document.getElementById("px-total").textContent = s.total; document.getElementById("px-good").textContent = s.good; document.getElementById("px-bad").textContent = s.bad; if (s.checking) { document.getElementById("px-status").textContent = "⏳ проверяем..."; checkProxyLoop(); } else { document.getElementById("px-status").textContent = "✅ готово"; toast("Рабочих: " + s.good); } }, 3000); }
 async function sendChat() { const id = +document.getElementById("chat-acc").value; const m = document.getElementById("chat-msg").value; if (!m) return; const r = await api("/api/chat/send", { id, message: m }); toast(r.ok ? "Отправлено" : r.error); document.getElementById("chat-msg").value = ""; }
 async function sendChatAll() { const m = document.getElementById("chat-all-msg").value; if (!m) return; const r = await api("/api/chat/send-all", { message: m }); toast("Отправляется: " + r.count); document.getElementById("chat-all-msg").value = ""; }
 
@@ -187,6 +202,7 @@ document.getElementById("chat-all-msg").onkeypress = e => { if (e.key==="Enter")
 load(); loadLogs();
 setInterval(load, 8000);
 setInterval(loadLogs, 15000);
+loadProxyStats();
 </script>
 </body>
 </html>

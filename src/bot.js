@@ -3,6 +3,7 @@ const https = require("https");
 const { SocksProxyAgent } = require("socks-proxy-agent");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const db = require("./database");
+const proxyPool = require("./proxy-pool");
 
 const clients = new Map();
 const watchers = new Map();
@@ -262,46 +263,18 @@ function startHLS(account) {
     watchers.set(account.id, { timer });
   }).catch(err => {
     console.log(`[HLS] ${account.login}: ${err.message}${proxyLabel}`);
-    // Если прокси не работает, попробуем SOCKS5
-    if (account.proxy && !watchers.has(account.id)) {
-      const socksAgent = createSocksAgent(account.proxy);
-      if (socksAgent) {
-        console.log(`[HLS] ${account.login}: пробуем SOCKS5...`);
-        startHLSWithAgent(account, socksAgent);
+    // Прокси не работает — помечаем и берём другой из пула
+    if (account.proxy) {
+      proxyPool.markBad(account.proxy);
+      const newProxy = proxyPool.getProxy(account.id);
+      if (newProxy && newProxy !== account.proxy) {
+        db.setProxy(account.id, newProxy);
+        console.log(`[HLS] ${account.login}: сменили прокси на ${newProxy.split(":")[0]}`);
+        // Пробуем с новым прокси
+        const updatedAccount = db.getAccountById(account.id);
+        setTimeout(() => startHLS(updatedAccount), 3000);
       }
     }
-  });
-}
-
-function startHLSWithAgent(account, agent) {
-  const channel = db.getSetting("channel");
-  const token = account.token.startsWith("oauth:") ? account.token : "oauth:" + account.token;
-
-  getAccessToken(channel, token, agent).then(tokenData => {
-    return getMasterPlaylist(channel, tokenData, agent);
-  }).then(mediaPlaylistUrl => {
-    if (!mediaPlaylistUrl) return;
-
-    console.log(`[HLS] ${account.login} смотрит (SOCKS5)`);
-    db.addLog("hls", account.login + " смотрит (SOCKS5)");
-
-    let errorCount = 0;
-    let lastSegment = "";
-
-    const timer = setInterval(() => {
-      httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
-        if (res.status !== 200) { errorCount++; if (errorCount >= 3) stopHLS(account.id); return; }
-        errorCount = 0;
-        const lines = res.data.split("\n");
-        let seg = null;
-        for (let i = lines.length - 1; i >= 0; i--) { const l = lines[i].trim(); if (l && !l.startsWith("#")) { seg = l; break; } }
-        if (seg && seg !== lastSegment) { lastSegment = seg; downloadSegment(seg, agent); }
-      }).catch(() => { errorCount++; if (errorCount >= 5) stopHLS(account.id); });
-    }, 5000);
-
-    watchers.set(account.id, { timer });
-  }).catch(err => {
-    console.log(`[HLS] ${account.login} SOCKS5 fail: ${err.message}`);
   });
 }
 
