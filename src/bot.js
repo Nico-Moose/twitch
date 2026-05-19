@@ -249,6 +249,7 @@ function startHLS(account) {
     db.addLog("hls", account.login + " смотрит" + proxyLabel);
 
     let errorCount = 0;
+    let lastSegment = "";
 
     const timer = setInterval(() => {
       httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
@@ -261,13 +262,25 @@ function startHLS(account) {
           return;
         }
         errorCount = 0;
-        // Сегменты не качаем — Twitch засчитывает зрителя по факту запроса плейлиста.
-        // Это экономит ~80% трафика.
+
+        const lines = res.data.split("\n");
+        let newestSegment = null;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i].trim();
+          if (line && !line.startsWith("#")) { newestSegment = line; break; }
+        }
+
+        // Качаем каждый новый сегмент по 1 КБ через Range —
+        // Twitch засчитывает зрителя именно по запросам сегментов.
+        if (newestSegment && newestSegment !== lastSegment) {
+          lastSegment = newestSegment;
+          downloadSegment(newestSegment, agent);
+        }
       }).catch(() => {
         errorCount++;
         if (errorCount >= 5) stopHLS(account.id);
       });
-    }, 30000); // refresh плейлиста каждые 30 сек — минимум для засчёта зрителя
+    }, 10000); // refresh плейлиста каждые 10 сек
 
     watchers.set(account.id, { timer });
   }).catch(err => {
