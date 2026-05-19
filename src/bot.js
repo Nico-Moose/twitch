@@ -271,12 +271,11 @@ function startHLS(account) {
           if (line && !line.startsWith("#")) { newestSegment = line; break; }
         }
 
-        // Качаем каждый 2-й новый сегмент по 512 байт через Range.
-        // Twitch засчитывает зрителя по запросам сегментов.
+        // Качаем каждый 3-й новый сегмент по 256 байт через Range.
         if (newestSegment && newestSegment !== lastSegment) {
           lastSegment = newestSegment;
           segmentCounter++;
-          if (segmentCounter % 2 === 0) {
+          if (segmentCounter % 3 === 0) {
             downloadSegment(newestSegment, agent);
           }
         }
@@ -284,7 +283,7 @@ function startHLS(account) {
         errorCount++;
         if (errorCount >= 5) stopHLS(account.id);
       });
-    }, 15000); // refresh плейлиста каждые 15 сек
+    }, 20000); // refresh плейлиста каждые 20 сек
 
     watchers.set(account.id, { timer });
   }).catch(err => {
@@ -316,13 +315,13 @@ function downloadSegment(url, agent) {
       timeout: 8000,
       // Range: 0-511 — просим только первые 512 байт. Twitch отдаёт 206 Partial Content,
       // зритель засчитывается, а трафик минимален.
-      headers: { "Range": "bytes=0-511", "Connection": "close" },
+      headers: { "Range": "bytes=0-255", "Connection": "close" },
     };
     if (agent) reqOpts.agent = agent;
 
     const req = https.request(reqOpts, (res) => {
       let bytes = 0;
-      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 512) res.destroy(); });
+      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 256) res.destroy(); });
       res.on("end", () => {});
       res.on("error", () => {});
     });
