@@ -159,7 +159,12 @@ router.post("/chat/send-all", (req, res) => {
 
 // Логи
 router.get("/logs", (req, res) => {
-  res.json(db.getLogs(50));
+  try {
+    const logs = db.getLogs(50);
+    res.json(logs || []);
+  } catch (e) {
+    res.json([]);
+  }
 });
 
 module.exports = router;

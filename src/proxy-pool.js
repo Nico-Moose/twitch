@@ -13,6 +13,7 @@ function loadProxies(text) {
   proxyList = lines;
   badProxies.clear();
   goodProxies = [];
+  checking = false; // сброс если зависло
   db.addLog("proxy", `Загружено ${lines.length} прокси`);
   console.log(`[PROXY] Загружено ${lines.length} прокси`);
   return lines.length;
