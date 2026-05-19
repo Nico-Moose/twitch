@@ -104,6 +104,7 @@
       <button class="btn btn-pri" onclick="loadProxies()">1. Загрузить</button>
       <button class="btn btn-warn" onclick="checkProxies()">2. Проверить</button>
       <button class="btn btn-go" onclick="assignProxies()">3. Назначить</button>
+      <button class="btn btn-stop" onclick="clearProxies()">🗑 Очистить у аккаунтов</button>
     </div>
     <div style="margin-top:10px;font-size:12px;color:#888;">
       <span>Загружено: <b id="px-total">0</b></span> |
@@ -191,6 +192,7 @@ async function setProxies() { const t = document.getElementById("proxy-list").va
 async function loadProxies() { const t = document.getElementById("proxy-list").value; if (!t.trim()) return; const r = await api("/api/proxy/load", { proxies: t }); toast("Загружено: " + r.loaded); loadProxyStats(); }
 async function checkProxies() { await api("/api/proxy/check", {}); toast("Проверка запущена..."); document.getElementById("px-status").textContent = "⏳ проверяем..."; checkProxyLoop(); }
 async function assignProxies() { const r = await api("/api/proxy/assign", {}); toast("Назначено: " + r.assigned); load(); }
+async function clearProxies() { if (!confirm("Очистить прокси у всех аккаунтов?")) return; const r = await api("/api/proxy/clear", {}); toast("Очищено: " + r.cleared); load(); }
 async function loadProxyStats() { const s = await api("/api/proxy/stats"); document.getElementById("px-total").textContent = s.total; document.getElementById("px-good").textContent = s.good; document.getElementById("px-bad").textContent = s.bad; document.getElementById("px-status").textContent = s.checking ? "⏳ проверяем..." : ""; }
 function checkProxyLoop() { setTimeout(async () => { const s = await api("/api/proxy/stats"); document.getElementById("px-total").textContent = s.total; document.getElementById("px-good").textContent = s.good; document.getElementById("px-bad").textContent = s.bad; if (s.checking) { document.getElementById("px-status").textContent = "⏳ проверяем..."; checkProxyLoop(); } else { document.getElementById("px-status").textContent = "✅ готово"; toast("Рабочих: " + s.good); } }, 3000); }
 async function sendChat() { const id = +document.getElementById("chat-acc").value; const m = document.getElementById("chat-msg").value; if (!m) return; const r = await api("/api/chat/send", { id, message: m }); toast(r.ok ? "Отправлено" : r.error); document.getElementById("chat-msg").value = ""; }

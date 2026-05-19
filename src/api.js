@@ -109,6 +109,14 @@ router.post("/proxy/assign", (req, res) => {
   res.json({ ok: true, assigned: count });
 });
 
+// Очистить прокси у всех аккаунтов
+router.post("/proxy/clear", (req, res) => {
+  const accounts = db.getAccounts();
+  accounts.forEach(a => db.setProxy(a.id, ""));
+  db.addLog("system", `Очищены прокси у ${accounts.length} аккаунтов`);
+  res.json({ ok: true, cleared: accounts.length });
+});
+
 // Статус прокси
 router.get("/proxy/stats", (req, res) => {
   res.json(proxyPool.getStats());
