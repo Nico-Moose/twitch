@@ -37,7 +37,7 @@ function checkProxy(proxy) {
         path: "/gql",
         method: "POST",
         agent: agent,
-        timeout: 8000,
+        timeout: 5000,
         headers: {
           "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
           "Content-Type": "application/json",
@@ -46,7 +46,6 @@ function checkProxy(proxy) {
         let data = "";
         res.on("data", chunk => data += chunk);
         res.on("end", () => {
-          // Если получили ответ от Twitch — прокси рабочий
           resolve(res.statusCode < 500);
         });
       });
@@ -62,11 +61,11 @@ function checkProxy(proxy) {
 }
 
 // Проверить пачку прокси и отобрать рабочие
-async function checkAll(batchSize = 50) {
+async function checkAll(batchSize = 200) {
   if (checking) return;
   checking = true;
 
-  console.log(`[PROXY] Проверяем ${proxyList.length} прокси...`);
+  console.log(`[PROXY] Проверяем ${proxyList.length} прокси (пачки по ${batchSize})...`);
   db.addLog("proxy", `Проверка ${proxyList.length} прокси...`);
 
   goodProxies = [];
@@ -89,8 +88,8 @@ async function checkAll(batchSize = 50) {
     });
 
     checked += batch.length;
-    if (checked % 200 === 0) {
-      console.log(`[PROXY] Проверено ${checked}/${proxyList.length}, рабочих: ${goodProxies.length}`);
+    if (checked % 500 === 0 || checked === proxyList.length) {
+      console.log(`[PROXY] ${checked}/${proxyList.length} | рабочих: ${goodProxies.length}`);
     }
   }
 
