@@ -57,16 +57,35 @@ function parseProxy(line) {
     } catch (e) { return null; }
   }
 
-  // user:pass@host:port
+  // Поддерживаем два формата с @:
+  //   user:pass@host:port  (стандартный)
+  //   host:port@user:pass  (proxy.market и некоторые другие)
   let user = null, pass = null;
   if (s.includes("@")) {
     const at = s.lastIndexOf("@");
-    const auth = s.slice(0, at);
-    const hp = s.slice(at + 1);
-    const ai = auth.indexOf(":");
-    if (ai > -1) { user = auth.slice(0, ai); pass = auth.slice(ai + 1); }
-    else { user = auth; pass = ""; }
-    s = hp;
+    const left = s.slice(0, at);
+    const right = s.slice(at + 1);
+
+    // Определяем кто из двух частей host:port — по тому что вторая часть является числом-портом
+    const leftParts = left.split(":");
+    const rightParts = right.split(":");
+    const leftPort = parseInt(leftParts[1], 10);
+    const rightPort = parseInt(rightParts[1], 10);
+    const leftIsHostPort = leftParts.length === 2 && !isNaN(leftPort) && leftPort > 0 && leftPort < 65536;
+    const rightIsHostPort = rightParts.length === 2 && !isNaN(rightPort) && rightPort > 0 && rightPort < 65536;
+
+    if (leftIsHostPort && !rightIsHostPort) {
+      // host:port@user:pass
+      user = rightParts[0];
+      pass = rightParts.slice(1).join(":");
+      s = left;
+    } else {
+      // user:pass@host:port (по умолчанию)
+      const ai = left.indexOf(":");
+      if (ai > -1) { user = left.slice(0, ai); pass = left.slice(ai + 1); }
+      else { user = left; pass = ""; }
+      s = right;
+    }
   }
 
   const parts = s.split(":");
