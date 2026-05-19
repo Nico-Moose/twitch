@@ -14,47 +14,58 @@ function rand(min, max) {
 }
 
 // === ПРОКСИ ===
-// Форматы: ip:port:login:pass или login:pass@ip:port или ip:port
+// Форматы:
+//   type://[user:pass@]host:port  (предпочтительный, type = http|socks4|socks5)
+//   ip:port
+//   ip:port:user:pass
+//   user:pass@ip:port
 function parseProxy(proxyStr) {
   if (!proxyStr || !proxyStr.trim()) return null;
   const p = proxyStr.trim();
 
-  // Формат: login:pass@ip:port
-  if (p.includes("@")) {
-    const [auth, host] = p.split("@");
-    const [user, pass] = auth.split(":");
-    const [ip, port] = host.split(":");
-    return { host: ip, port: parseInt(port), user, pass };
+  // С схемой
+  if (/^(https?|socks[45]):\/\//i.test(p)) {
+    try {
+      const u = new URL(p);
+      let type = u.protocol.replace(":", "").toLowerCase();
+      if (type === "https") type = "http";
+      return {
+        type,
+        host: u.hostname,
+        port: parseInt(u.port, 10),
+        user: u.username ? decodeURIComponent(u.username) : null,
+        pass: u.password ? decodeURIComponent(u.password) : null,
+      };
+    } catch (e) { return null; }
   }
 
-  // Формат: ip:port:login:pass
+  // user:pass@host:port
+  if (p.includes("@")) {
+    const at = p.lastIndexOf("@");
+    const auth = p.slice(0, at);
+    const hp = p.slice(at + 1);
+    const ai = auth.indexOf(":");
+    const user = ai > -1 ? auth.slice(0, ai) : auth;
+    const pass = ai > -1 ? auth.slice(ai + 1) : "";
+    const [ip, port] = hp.split(":");
+    return { type: "http", host: ip, port: parseInt(port, 10), user, pass };
+  }
+
   const parts = p.split(":");
-  if (parts.length === 4) {
-    return { host: parts[0], port: parseInt(parts[1]), user: parts[2], pass: parts[3] };
-  }
-  if (parts.length === 2) {
-    return { host: parts[0], port: parseInt(parts[1]), user: null, pass: null };
-  }
+  if (parts.length >= 4) return { type: "http", host: parts[0], port: parseInt(parts[1], 10), user: parts[2], pass: parts.slice(3).join(":") };
+  if (parts.length === 2) return { type: "http", host: parts[0], port: parseInt(parts[1], 10), user: null, pass: null };
   return null;
 }
 
 function createAgent(proxyStr) {
   const proxy = parseProxy(proxyStr);
-  if (!proxy) return null;
+  if (!proxy || !proxy.host || !proxy.port) return null;
 
-  // Пробуем как HTTP прокси (большинство прокси такие)
-  const auth = proxy.user ? `${proxy.user}:${proxy.pass}@` : "";
-  const url = `http://${auth}${proxy.host}:${proxy.port}`;
-  return new HttpsProxyAgent(url);
-}
-
-function createSocksAgent(proxyStr) {
-  const proxy = parseProxy(proxyStr);
-  if (!proxy) return null;
-
-  const auth = proxy.user ? `${proxy.user}:${proxy.pass}@` : "";
-  const url = `socks5://${auth}${proxy.host}:${proxy.port}`;
-  return new SocksProxyAgent(url);
+  const auth = proxy.user ? `${encodeURIComponent(proxy.user)}:${encodeURIComponent(proxy.pass || "")}@` : "";
+  if (proxy.type === "socks4" || proxy.type === "socks5") {
+    return new SocksProxyAgent(`${proxy.type}://${auth}${proxy.host}:${proxy.port}`);
+  }
+  return new HttpsProxyAgent(`http://${auth}${proxy.host}:${proxy.port}`);
 }
 
 // === HTTPS с прокси ===
