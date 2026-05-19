@@ -7,13 +7,20 @@ const twitch = require("./twitch-manager");
 router.get("/status", (req, res) => {
   const status = twitch.getStatus();
   const settings = db.getAllSettings();
-  res.json({ ...status, settings });
+  const queue = twitch.getQueueStatus();
+  res.json({ ...status, settings, queue });
 });
 
 // Аккаунты
 router.get("/accounts", (req, res) => {
   const accounts = db.getAccounts();
-  res.json(accounts);
+  // Добавляем инфо о таймерах
+  const now = Date.now();
+  const enriched = accounts.map(a => ({
+    ...a,
+    time_left: a.next_action_at > now ? Math.round((a.next_action_at - now) / 1000) : 0,
+  }));
+  res.json(enriched);
 });
 
 router.post("/accounts/add", (req, res) => {
@@ -50,7 +57,6 @@ router.post("/accounts/toggle", (req, res) => {
   res.json({ ok: true });
 });
 
-// Действия с одним аккаунтом
 router.post("/accounts/connect", (req, res) => {
   const { id } = req.body;
   twitch.connectOne(id);
@@ -63,29 +69,55 @@ router.post("/accounts/disconnect", (req, res) => {
   res.json({ ok: true });
 });
 
+// Таймеры аккаунта
+router.post("/accounts/set-times", (req, res) => {
+  const { id, watch_time, afk_time } = req.body;
+  db.setAccountTimes(id, watch_time, afk_time);
+  res.json({ ok: true });
+});
+
+// Цикл для одного аккаунта
+router.post("/accounts/start-cycle", (req, res) => {
+  const { id } = req.body;
+  db.setCycleActive(id, true);
+  db.setPhase(id, "joining", Date.now());
+  twitch.startCycleProcessor();
+  db.addLog("cycle", `Цикл запущен для аккаунта #${id}`);
+  res.json({ ok: true });
+});
+
+router.post("/accounts/stop-cycle", (req, res) => {
+  const { id } = req.body;
+  db.setCycleActive(id, false);
+  db.setPhase(id, "idle", 0);
+  res.json({ ok: true });
+});
+
 // Очередь
-router.post("/accounts/queue-join", (req, res) => {
-  const { id } = req.body;
-  twitch.queueJoin(id);
+router.post("/queue/start-join", (req, res) => {
+  twitch.startQueueJoin();
   res.json({ ok: true });
 });
 
-router.post("/accounts/queue-leave", (req, res) => {
-  const { id } = req.body;
-  twitch.queueLeave(id);
+router.post("/queue/start-leave", (req, res) => {
+  twitch.startQueueLeave();
   res.json({ ok: true });
 });
 
-router.post("/accounts/queue-join-all", (req, res) => {
-  const accounts = db.getAccounts().filter(a => a.enabled && a.status !== "подключен");
-  accounts.forEach(a => twitch.queueJoin(a.id));
-  res.json({ ok: true, queued: accounts.length });
+router.post("/queue/stop", (req, res) => {
+  twitch.stopQueues();
+  res.json({ ok: true });
 });
 
-router.post("/accounts/queue-leave-all", (req, res) => {
-  const accounts = db.getAccounts().filter(a => a.status === "подключен");
-  accounts.forEach(a => twitch.queueLeave(a.id));
-  res.json({ ok: true, queued: accounts.length });
+// Цикл глобальный
+router.post("/cycle/start", (req, res) => {
+  twitch.startCycleAll();
+  res.json({ ok: true });
+});
+
+router.post("/cycle/stop", (req, res) => {
+  twitch.stopCycleAll();
+  res.json({ ok: true });
 });
 
 // Массовые действия
@@ -104,30 +136,14 @@ router.post("/action/reconnect-all", (req, res) => {
   res.json({ ok: true });
 });
 
-// Фолловинг
-router.post("/accounts/follow", (req, res) => {
-  const { id } = req.body;
-  const accounts = db.getAccounts();
-  const account = accounts.find(a => a.id === id);
-  if (!account) return res.json({ ok: false, error: "Аккаунт не найден" });
-  twitch.followChannel(account).then(result => res.json(result));
-});
-
-router.post("/action/follow-all", (req, res) => {
-  const accounts = db.getEnabledAccounts();
-  accounts.forEach(a => twitch.followChannel(a));
-  db.addLog("follow", `Фолловинг: ${accounts.length} аккаунтов`);
-  res.json({ ok: true, count: accounts.length });
-});
-
 // Настройки
 router.post("/settings", (req, res) => {
-  const { channel, auto_rejoin, rejoin_interval, auto_follow } = req.body;
-  if (channel !== undefined) db.setSetting("channel", channel.toLowerCase().trim());
-  if (auto_rejoin !== undefined) db.setSetting("auto_rejoin", auto_rejoin);
-  if (rejoin_interval !== undefined) db.setSetting("rejoin_interval", rejoin_interval);
-  if (auto_follow !== undefined) db.setSetting("auto_follow", auto_follow);
-  twitch.startAutoRejoin();
+  const fields = ["channel", "auto_rejoin", "rejoin_interval", "queue_join_interval", "queue_leave_interval", "global_cycle", "global_watch_time", "global_afk_time"];
+  fields.forEach(key => {
+    if (req.body[key] !== undefined) {
+      db.setSetting(key, key === "channel" ? req.body[key].toLowerCase().trim() : req.body[key]);
+    }
+  });
   db.addLog("settings", "Настройки обновлены");
   res.json({ ok: true });
 });
@@ -136,11 +152,6 @@ router.post("/settings", (req, res) => {
 router.get("/logs", (req, res) => {
   const logs = db.getLogs(100);
   res.json(logs);
-});
-
-router.post("/logs/clear", (req, res) => {
-  db.addLog("system", "Логи очищены");
-  res.json({ ok: true });
 });
 
 module.exports = router;

@@ -2,29 +2,30 @@ const tmi = require("tmi.js");
 const db = require("./database");
 
 const clients = new Map(); // id -> { client, pingInterval }
-let rejoinTimer = null;
-let queueTimer = null;
+let cycleTimer = null;
+let queueJoinTimer = null;
+let queueLeaveTimer = null;
 
+// === СТАТУС ===
 function getStatus() {
   const accounts = db.getAccounts();
-  let connected = 0;
-  let disconnected = 0;
-  let errors = 0;
+  let connected = 0, disconnected = 0, errors = 0, cycling = 0;
 
   accounts.forEach(a => {
     if (a.status === "подключен") connected++;
     else if (a.status.includes("ошибка")) errors++;
     else disconnected++;
+    if (a.cycle_active) cycling++;
   });
 
-  return { total: accounts.length, connected, disconnected, errors };
+  return { total: accounts.length, connected, disconnected, errors, cycling };
 }
 
+// === ПОДКЛЮЧЕНИЕ ===
 function connectAccount(account) {
   const channel = db.getSetting("channel");
   if (!channel) return;
 
-  // Отключаем если уже подключен
   if (clients.has(account.id)) {
     disconnectAccount(account.id);
   }
@@ -47,25 +48,15 @@ function connectAccount(account) {
   }).catch((err) => {
     db.setAccountStatus(account.id, "ошибка: " + err.message);
     db.addLog("error", `${account.login}: ${err.message}`);
-    console.error(`[ОШИБКА] ${account.login}: ${err.message}`);
+    console.error(`[ERR] ${account.login}: ${err.message}`);
   });
 
-  client.on("disconnected", () => {
-    db.setAccountStatus(account.id, "отключен");
-  });
-
-  client.on("reconnect", () => {
-    db.setAccountStatus(account.id, "переподключение...");
-  });
-
-  client.on("connected", () => {
-    db.setAccountStatus(account.id, "подключен");
-  });
+  client.on("disconnected", () => { db.setAccountStatus(account.id, "отключен"); });
+  client.on("reconnect", () => { db.setAccountStatus(account.id, "переподключение..."); });
+  client.on("connected", () => { db.setAccountStatus(account.id, "подключен"); });
 
   const pingInterval = setInterval(() => {
-    if (client.readyState() === "OPEN") {
-      client.ping().catch(() => {});
-    }
+    if (client.readyState() === "OPEN") client.ping().catch(() => {});
   }, 4 * 60 * 1000);
 
   clients.set(account.id, { client, pingInterval });
@@ -84,10 +75,7 @@ function disconnectAccount(id) {
 function connectAll() {
   const accounts = db.getEnabledAccounts();
   const channel = db.getSetting("channel");
-  if (!channel) {
-    console.log("[WARN] Канал не задан");
-    return;
-  }
+  if (!channel) { console.log("[WARN] Канал не задан"); return; }
   db.addLog("system", `Подключаем ${accounts.length} аккаунтов к ${channel}`);
   accounts.forEach((account, index) => {
     setTimeout(() => connectAccount(account), index * 3000);
@@ -97,93 +85,172 @@ function connectAll() {
 function disconnectAll() {
   const accounts = db.getAccounts();
   accounts.forEach(a => disconnectAccount(a.id));
-  db.addLog("system", "Все аккаунты отключены");
+  db.addLog("system", "Все отключены");
 }
 
 function reconnectAll() {
   disconnectAll();
   setTimeout(() => connectAll(), 5000);
-  db.addLog("system", "Переподключение всех аккаунтов");
+  db.addLog("system", "Переподключение всех");
 }
 
-// Подключить один аккаунт
 function connectOne(id) {
-  const accounts = db.getAccounts();
-  const account = accounts.find(a => a.id === id);
+  const account = db.getAccountById(id);
   if (account) connectAccount(account);
 }
 
-// Очередь: заход/выход
-function queueJoin(id) {
-  db.setQueueAction(id, "join");
-  db.addLog("queue", `Аккаунт #${id} в очереди на заход`);
+// === ОЧЕРЕДЬ ЗАХОДА (по одному через интервал) ===
+let joinQueue = [];
+let leaveQueue = [];
+
+function startQueueJoin() {
+  const accounts = db.getEnabledAccounts().filter(a => a.status !== "подключен");
+  // Рандомный порядок
+  joinQueue = accounts.sort(() => Math.random() - 0.5);
+  const interval = (parseInt(db.getSetting("queue_join_interval")) || 2) * 60 * 1000;
+
+  db.addLog("queue", `Очередь на заход: ${joinQueue.length} аккаунтов, интервал ${interval / 60000} мин`);
+
+  clearInterval(queueJoinTimer);
+  processJoinQueue(); // первый сразу
+
+  queueJoinTimer = setInterval(() => {
+    processJoinQueue();
+  }, interval);
 }
 
-function queueLeave(id) {
-  db.setQueueAction(id, "leave");
-  db.addLog("queue", `Аккаунт #${id} в очереди на выход`);
+function processJoinQueue() {
+  if (joinQueue.length === 0) {
+    clearInterval(queueJoinTimer);
+    queueJoinTimer = null;
+    db.addLog("queue", "Очередь на заход завершена");
+    return;
+  }
+  const account = joinQueue.shift();
+  connectAccount(account);
+  db.addLog("queue", `${account.login} зашёл (осталось: ${joinQueue.length})`);
 }
 
-function processQueue() {
-  // Обрабатываем очередь на заход
-  const joinQueue = db.getQueuedAccounts("join");
-  joinQueue.forEach((account, index) => {
-    setTimeout(() => {
-      connectAccount(account);
-      db.clearQueue(account.id);
-    }, index * 3000);
+function startQueueLeave() {
+  const accounts = db.getAccounts().filter(a => a.status === "подключен");
+  leaveQueue = accounts.sort(() => Math.random() - 0.5);
+  const interval = (parseInt(db.getSetting("queue_leave_interval")) || 2) * 60 * 1000;
+
+  db.addLog("queue", `Очередь на выход: ${leaveQueue.length} аккаунтов, интервал ${interval / 60000} мин`);
+
+  clearInterval(queueLeaveTimer);
+  processLeaveQueue();
+
+  queueLeaveTimer = setInterval(() => {
+    processLeaveQueue();
+  }, interval);
+}
+
+function processLeaveQueue() {
+  if (leaveQueue.length === 0) {
+    clearInterval(queueLeaveTimer);
+    queueLeaveTimer = null;
+    db.addLog("queue", "Очередь на выход завершена");
+    return;
+  }
+  const account = leaveQueue.shift();
+  disconnectAccount(account.id);
+  db.addLog("queue", `${account.login} вышел (осталось: ${leaveQueue.length})`);
+}
+
+function stopQueues() {
+  clearInterval(queueJoinTimer);
+  clearInterval(queueLeaveTimer);
+  queueJoinTimer = null;
+  queueLeaveTimer = null;
+  joinQueue = [];
+  leaveQueue = [];
+  db.addLog("queue", "Очереди остановлены");
+}
+
+// === ЦИКЛ ЗАХОД/ВЫХОД (для каждого аккаунта индивидуально) ===
+// Каждый аккаунт: сидит watch_time мин -> уходит на afk_time мин -> возвращается -> повтор
+
+function startCycleAll() {
+  const accounts = db.getEnabledAccounts();
+  const globalWatch = parseInt(db.getSetting("global_watch_time")) || 20;
+  const globalAfk = parseInt(db.getSetting("global_afk_time")) || 10;
+  const now = Date.now();
+
+  accounts.forEach((account, index) => {
+    const watchTime = account.watch_time || globalWatch;
+    // Рандомный старт чтобы не все одновременно
+    const randomDelay = index * 30 * 1000 + Math.random() * 60 * 1000;
+    const nextAction = now + randomDelay;
+
+    db.setCycleActive(account.id, true);
+    db.setPhase(account.id, "joining", nextAction);
   });
 
-  // Обрабатываем очередь на выход
-  const leaveQueue = db.getQueuedAccounts("leave");
-  leaveQueue.forEach((account, index) => {
-    setTimeout(() => {
-      disconnectAccount(account.id);
-      db.clearQueue(account.id);
-    }, index * 1000);
-  });
+  db.addLog("cycle", `Цикл запущен для ${accounts.length} аккаунтов`);
+  startCycleProcessor();
 }
 
-// Авто-перезаход
-function startAutoRejoin() {
-  stopAutoRejoin();
-  const enabled = db.getSetting("auto_rejoin") === "1";
-  const minutes = parseInt(db.getSetting("rejoin_interval")) || 30;
-
-  if (!enabled) return;
-
-  console.log(`[AUTO] Перезаход каждые ${minutes} мин`);
-  db.addLog("system", `Авто-перезаход: каждые ${minutes} мин`);
-
-  rejoinTimer = setInterval(() => {
-    console.log("[AUTO] Перезаход...");
-    reconnectAll();
-  }, minutes * 60 * 1000);
+function stopCycleAll() {
+  db.stopAllCycles();
+  stopCycleProcessor();
+  db.addLog("cycle", "Цикл остановлен");
 }
 
-function stopAutoRejoin() {
-  if (rejoinTimer) {
-    clearInterval(rejoinTimer);
-    rejoinTimer = null;
+function startCycleProcessor() {
+  if (cycleTimer) return;
+  cycleTimer = setInterval(() => {
+    processCycles();
+  }, 15 * 1000); // проверяем каждые 15 сек
+}
+
+function stopCycleProcessor() {
+  if (cycleTimer) {
+    clearInterval(cycleTimer);
+    cycleTimer = null;
   }
 }
 
-// Обработка очереди каждые 10 сек
-queueTimer = setInterval(() => {
-  processQueue();
-}, 10 * 1000);
+function processCycles() {
+  const now = Date.now();
+  const accounts = db.getCycleAccounts();
 
-// Фолловинг (через IRC команду /follow не работает, нужен Twitch API)
-// Для фолловинга нужен отдельный подход через Twitch Helix API
-async function followChannel(account) {
-  const channel = db.getSetting("channel");
-  if (!channel) return { ok: false, error: "Канал не задан" };
+  accounts.forEach(account => {
+    if (account.next_action_at > now) return; // ещё не время
 
-  // tmi.js не поддерживает follow, нужен HTTP запрос к Twitch API
-  // Для этого нужен Client-ID и токен с правами user:edit:follows
-  // Пока логируем что функция вызвана
-  db.addLog("follow", `${account.login} -> follow ${channel} (требуется API scope)`);
-  return { ok: false, error: "Для фолловинга нужен токен с правами user:edit:follows" };
+    const globalWatch = parseInt(db.getSetting("global_watch_time")) || 20;
+    const globalAfk = parseInt(db.getSetting("global_afk_time")) || 10;
+    const watchTime = account.watch_time || globalWatch;
+    const afkTime = account.afk_time || globalAfk;
+
+    if (account.current_phase === "joining") {
+      // Пора подключиться
+      connectAccount(account);
+      const watchMs = watchTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000); // +0-2 мин рандом
+      db.setPhase(account.id, "watching", now + watchMs);
+      db.addLog("cycle", `${account.login} зашёл, будет смотреть ${Math.round(watchMs / 60000)} мин`);
+    }
+    else if (account.current_phase === "watching") {
+      // Время вышло — уходим в АФК
+      disconnectAccount(account.id);
+      const afkMs = afkTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000);
+      db.setPhase(account.id, "afk", now + afkMs);
+      db.addLog("cycle", `${account.login} ушёл в АФК на ${Math.round(afkMs / 60000)} мин`);
+    }
+    else if (account.current_phase === "afk") {
+      // АФК закончился — снова заходим
+      connectAccount(account);
+      const watchMs = watchTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000);
+      db.setPhase(account.id, "watching", now + watchMs);
+      db.addLog("cycle", `${account.login} вернулся, будет смотреть ${Math.round(watchMs / 60000)} мин`);
+    }
+  });
+}
+
+// Запускаем процессор если есть активные циклы
+const activeCycles = db.getCycleAccounts();
+if (activeCycles.length > 0) {
+  startCycleProcessor();
 }
 
 module.exports = {
@@ -194,11 +261,11 @@ module.exports = {
   disconnectAll,
   reconnectAll,
   connectOne,
-  queueJoin,
-  queueLeave,
-  processQueue,
-  startAutoRejoin,
-  stopAutoRejoin,
-  followChannel,
-  isConnected: (id) => clients.has(id),
+  startQueueJoin,
+  startQueueLeave,
+  stopQueues,
+  startCycleAll,
+  stopCycleAll,
+  startCycleProcessor,
+  getQueueStatus: () => ({ joinQueue: joinQueue.length, leaveQueue: leaveQueue.length }),
 };
