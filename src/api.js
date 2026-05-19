@@ -62,13 +62,21 @@ router.post("/accounts/delete", (req, res) => {
 
 // Старт/Стоп
 router.post("/start", (req, res) => {
-  bot.start();
-  res.json({ ok: true });
+  try {
+    bot.start();
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
 });
 
 router.post("/stop", (req, res) => {
-  bot.stop();
-  res.json({ ok: true });
+  try {
+    bot.stop();
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
 });
 
 // Настройки

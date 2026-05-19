@@ -39,6 +39,12 @@ app.use("/api", (req, res, next) => {
 
 app.use("/api", apiRoutes);
 
+// Обработка ошибок
+app.use((err, req, res, next) => {
+  console.error("[ERROR]", err.message);
+  res.status(500).json({ error: err.message });
+});
+
 app.get("/admin", (req, res) => {
   const pass = req.query.pass || "";
   if (pass === ADMIN_PASS) return res.sendFile(path.join(__dirname, "public", "admin.html"));

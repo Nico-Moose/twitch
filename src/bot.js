@@ -64,27 +64,34 @@ function disconnectAll() {
 // 4. После АФК — снова заходит и повторяет
 
 function start() {
-  const accounts = db.getEnabledAccounts();
-  if (accounts.length === 0) return;
+  try {
+    const accounts = db.getEnabledAccounts();
+    if (accounts.length === 0) { console.log("[START] Нет аккаунтов"); return; }
 
-  const channel = db.getSetting("channel");
-  if (!channel) return;
+    const channel = db.getSetting("channel");
+    if (!channel) { console.log("[START] Канал не задан"); return; }
 
-  db.setSetting("running", "1");
-  db.addLog("system", "СТАРТ — заходим на " + channel);
+    // Сначала сбрасываем всех
+    disconnectAll();
 
-  const interval = (parseInt(db.getSetting("join_interval")) || 3) * 60 * 1000; // минуты
-  const now = Date.now();
+    db.setSetting("running", "1");
+    db.addLog("system", "СТАРТ — заходим на " + channel);
 
-  // Расставляем время захода для каждого аккаунта (по очереди с интервалом)
-  accounts.forEach((acc, i) => {
-    const joinAt = now + i * interval;
-    db.setPhase(acc.id, "waiting_join", joinAt);
-    db.setStatus(acc.id, "ожидание");
-  });
+    const interval = (parseInt(db.getSetting("join_interval")) || 3) * 60 * 1000;
+    const now = Date.now();
 
-  console.log(`[START] ${accounts.length} аккаунтов, интервал ${interval / 60000} мин`);
-  startLoop();
+    accounts.forEach((acc, i) => {
+      const joinAt = now + i * interval;
+      db.setPhase(acc.id, "waiting_join", joinAt);
+      db.setStatus(acc.id, "ожидание");
+    });
+
+    console.log(`[START] ${accounts.length} аккаунтов, интервал ${interval / 60000} мин`);
+    startLoop();
+  } catch (err) {
+    console.error("[START ERROR]", err.message);
+    db.addLog("error", "start: " + err.message);
+  }
 }
 
 function stop() {
