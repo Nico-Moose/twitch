@@ -1,7 +1,10 @@
 const tmi = require("tmi.js");
+const https = require("https");
+const http = require("http");
 const db = require("./database");
 
 const clients = new Map(); // id -> tmi.Client
+const streamWatchers = new Map(); // id -> interval (HLS)
 let loopTimer = null;
 
 // Рандом от min до max
@@ -29,6 +32,8 @@ function connect(account) {
     db.setStatus(account.id, "online");
     console.log(`[+] ${account.login} зашёл`);
     db.addLog("join", account.login + " зашёл");
+    // Запускаем просмотр HLS потока
+    startWatching(account);
   }).catch(err => {
     db.setStatus(account.id, "error");
     console.log(`[!] ${account.login}: ${err.message}`);
@@ -45,7 +50,147 @@ function disconnect(id) {
     client.disconnect().catch(() => {});
     clients.delete(id);
   }
+  stopWatching(id);
   db.setStatus(id, "offline");
+}
+
+// === HLS ПРОСМОТР (увеличивает счётчик зрителей) ===
+function getStreamToken(channel, oauthToken) {
+  return new Promise((resolve, reject) => {
+    const token = oauthToken.replace("oauth:", "");
+    const body = JSON.stringify({
+      operationName: "PlaybackAccessToken",
+      extensions: {
+        persistedQuery: {
+          version: 1,
+          sha256Hash: "0828119ded1c13477966434e15800ff57ddacf13ba1911c129dc2200705b0712"
+        }
+      },
+      variables: {
+        isLive: true,
+        login: channel,
+        isVod: false,
+        vodID: "",
+        playerType: "embed"
+      }
+    });
+
+    const options = {
+      hostname: "gql.twitch.tv",
+      path: "/gql",
+      method: "POST",
+      headers: {
+        "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        "Authorization": "OAuth " + token,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.data && json.data.streamPlaybackAccessToken) {
+            resolve(json.data.streamPlaybackAccessToken);
+          } else {
+            reject(new Error("No token"));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function getPlaylist(channel, tokenData) {
+  return new Promise((resolve, reject) => {
+    const url = `https://usher.ttvnw.net/api/channel/hls/${channel}.m3u8?` +
+      `allow_source=true&fast_bread=true&p=${Math.floor(Math.random()*999999)}` +
+      `&player_backend=mediaplayer&playlist_include_framerate=true&reassignments_supported=true` +
+      `&sig=${tokenData.signature}&supported_codecs=avc1&token=${encodeURIComponent(tokenData.value)}` +
+      `&cdm=wv&player_version=1.22.0`;
+
+    https.get(url, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          // Берём самое низкое качество (160p) чтобы не жрать трафик
+          const lines = data.split("\n");
+          let streamUrl = null;
+          for (let i = lines.length - 1; i >= 0; i--) {
+            if (lines[i].startsWith("http")) {
+              streamUrl = lines[i].trim();
+              break;
+            }
+          }
+          resolve(streamUrl);
+        } else {
+          reject(new Error("Playlist " + res.statusCode));
+        }
+      });
+    }).on("error", reject);
+  });
+}
+
+function fetchSegment(url) {
+  return new Promise((resolve) => {
+    https.get(url, (res) => {
+      // Просто читаем данные и выбрасываем — нам нужен только факт запроса
+      res.on("data", () => {});
+      res.on("end", () => resolve(true));
+    }).on("error", () => resolve(false));
+  });
+}
+
+function startWatching(account) {
+  const channel = db.getSetting("channel");
+  if (!channel) return;
+
+  const token = account.token.startsWith("oauth:") ? account.token : "oauth:" + account.token;
+
+  // Получаем токен и плейлист, потом запрашиваем сегменты каждые 10 сек
+  getStreamToken(channel, token).then(tokenData => {
+    return getPlaylist(channel, tokenData);
+  }).then(playlistUrl => {
+    if (!playlistUrl) return;
+
+    // Запрашиваем плейлист каждые 15 сек (имитация просмотра)
+    const interval = setInterval(() => {
+      // Запрашиваем плейлист чтобы Twitch считал нас зрителем
+      https.get(playlistUrl, (res) => {
+        let data = "";
+        res.on("data", chunk => data += chunk);
+        res.on("end", () => {
+          // Берём последний сегмент и запрашиваем его
+          const lines = data.split("\n").filter(l => l.startsWith("http"));
+          if (lines.length > 0) {
+            fetchSegment(lines[lines.length - 1]);
+          }
+        });
+      }).on("error", () => {});
+    }, 15000);
+
+    streamWatchers.set(account.id, interval);
+    console.log(`[HLS] ${account.login} смотрит поток`);
+  }).catch(err => {
+    console.log(`[HLS] ${account.login}: ${err.message}`);
+  });
+}
+
+function stopWatching(id) {
+  const interval = streamWatchers.get(id);
+  if (interval) {
+    clearInterval(interval);
+    streamWatchers.delete(id);
+  }
 }
 
 // Отключить всех
