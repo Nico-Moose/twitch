@@ -3,31 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Twitch Bot - Панель управления</title>
+  <title>Twitch Bot - Панель</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f0c29; color: #e0e0e0; min-height: 100vh; }
-
-    .navbar {
-      background: rgba(26, 26, 46, 0.98);
-      padding: 12px 25px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid #2a2a4a;
-      position: sticky; top: 0; z-index: 100;
-    }
+    .navbar { background: rgba(26,26,46,0.98); padding: 12px 25px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2a2a4a; position: sticky; top: 0; z-index: 100; }
     .navbar h1 { color: #9146ff; font-size: 18px; }
-    .nav-links { display: flex; gap: 6px; flex-wrap: wrap; }
-    .nav-links button {
-      padding: 7px 14px; background: #1a1a2e; color: #aaa;
-      border: 1px solid #333; border-radius: 6px; cursor: pointer; font-size: 13px;
-    }
+    .nav-links { display: flex; gap: 5px; flex-wrap: wrap; }
+    .nav-links button { padding: 6px 12px; background: #1a1a2e; color: #aaa; border: 1px solid #333; border-radius: 6px; cursor: pointer; font-size: 12px; }
     .nav-links button:hover, .nav-links button.active { background: #9146ff; color: #fff; border-color: #9146ff; }
-
     .container { max-width: 1300px; margin: 0 auto; padding: 20px; }
-
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
     .stat-card { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 16px; border-radius: 10px; border: 1px solid #2a2a4a; }
     .stat-card .value { font-size: 28px; font-weight: bold; color: #9146ff; }
     .stat-card .label { color: #777; margin-top: 4px; font-size: 12px; }
@@ -35,64 +21,44 @@
     .stat-card.red .value { color: #f44336; }
     .stat-card.orange .value { color: #ff9800; }
     .stat-card.blue .value { color: #2196f3; }
-
-    .section { background: rgba(26, 26, 46, 0.95); border-radius: 10px; padding: 20px; margin-bottom: 16px; border: 1px solid #2a2a4a; }
+    .section { background: rgba(26,26,46,0.95); border-radius: 10px; padding: 20px; margin-bottom: 16px; border: 1px solid #2a2a4a; }
     .section h2 { color: #9146ff; margin-bottom: 12px; font-size: 16px; }
-
     .btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px; }
     .btn-primary { background: #9146ff; color: #fff; }
-    .btn-primary:hover { background: #7c3aed; }
     .btn-success { background: #4caf50; color: #fff; }
-    .btn-success:hover { background: #388e3c; }
     .btn-danger { background: #f44336; color: #fff; }
-    .btn-danger:hover { background: #d32f2f; }
     .btn-warning { background: #ff9800; color: #fff; }
-    .btn-warning:hover { background: #f57c00; }
     .btn-info { background: #2196f3; color: #fff; }
-    .btn-info:hover { background: #1976d2; }
+    .btn-pink { background: #e91e63; color: #fff; }
     .btn-sm { padding: 4px 8px; font-size: 11px; }
     .btn-group { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th { background: #16213e; color: #9146ff; padding: 10px 8px; text-align: left; }
     td { padding: 8px; border-bottom: 1px solid #1a1a2e; }
-    tr:hover { background: rgba(145, 70, 255, 0.05); }
+    tr:hover { background: rgba(145,70,255,0.05); }
     .table-wrap { overflow-x: auto; }
-
     .status { padding: 2px 7px; border-radius: 4px; font-size: 11px; }
-    .status-online { background: rgba(76, 175, 80, 0.2); color: #4caf50; }
-    .status-offline { background: rgba(158, 158, 158, 0.2); color: #9e9e9e; }
-    .status-error { background: rgba(244, 67, 54, 0.2); color: #f44336; }
-    .status-connecting { background: rgba(33, 150, 243, 0.2); color: #2196f3; }
-    .status-afk { background: rgba(255, 152, 0, 0.2); color: #ff9800; }
-    .status-watching { background: rgba(76, 175, 80, 0.2); color: #4caf50; }
-    .status-cycle { background: rgba(156, 39, 176, 0.2); color: #ce93d8; }
-
-    input, select, textarea {
-      padding: 8px 12px; border: 1px solid #333; border-radius: 6px;
-      background: #16213e; color: #fff; font-size: 13px; outline: none;
-    }
-    input:focus, select:focus, textarea:focus { border-color: #9146ff; }
+    .status-online { background: rgba(76,175,80,0.2); color: #4caf50; }
+    .status-offline { background: rgba(158,158,158,0.2); color: #9e9e9e; }
+    .status-error { background: rgba(244,67,54,0.2); color: #f44336; }
+    .status-connecting { background: rgba(33,150,243,0.2); color: #2196f3; }
+    .status-watching { background: rgba(76,175,80,0.2); color: #4caf50; }
+    .status-afk { background: rgba(255,152,0,0.2); color: #ff9800; }
+    input, select, textarea { padding: 8px 12px; border: 1px solid #333; border-radius: 6px; background: #16213e; color: #fff; font-size: 13px; outline: none; }
+    input:focus, textarea:focus { border-color: #9146ff; }
     textarea { width: 100%; min-height: 80px; resize: vertical; font-family: monospace; }
     .form-row { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
     .form-row label { color: #aaa; min-width: 140px; font-size: 13px; }
-    .form-row input[type="number"] { width: 70px; }
-
     .log-list { max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 11px; }
     .log-item { padding: 4px 8px; border-bottom: 1px solid #111; }
     .log-item .time { color: #555; }
-
     .tabs { display: none; }
     .tabs.active { display: block; }
-
     .toast { position: fixed; bottom: 20px; right: 20px; background: #4caf50; color: #fff; padding: 10px 20px; border-radius: 8px; display: none; z-index: 1000; font-size: 13px; }
-
     .timer-badge { font-size: 11px; color: #ff9800; font-weight: bold; }
-
-    @media (max-width: 768px) {
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
-      .nav-links button { padding: 5px 8px; font-size: 11px; }
-    }
+    .chat-box { background: #16213e; border-radius: 8px; padding: 15px; margin-top: 10px; }
+    .chat-input { display: flex; gap: 8px; margin-top: 10px; }
+    .chat-input input { flex: 1; }
   </style>
 </head>
 <body>
@@ -103,11 +69,11 @@
       <button onclick="showTab('accounts')">👥 Аккаунты</button>
       <button onclick="showTab('queue')">📥 Очередь</button>
       <button onclick="showTab('cycle')">🔄 Цикл</button>
+      <button onclick="showTab('chat')">💬 Чат</button>
       <button onclick="showTab('settings')">⚙️ Настройки</button>
       <button onclick="showTab('logs')">📋 Логи</button>
     </div>
   </nav>
-
   <div class="container">
     <!-- ДАШБОРД -->
     <div class="tabs active" id="tab-dashboard">
@@ -118,16 +84,15 @@
         <div class="stat-card red"><div class="value" id="st-errors">0</div><div class="label">Ошибки</div></div>
         <div class="stat-card blue"><div class="value" id="st-cycling">0</div><div class="label">В цикле</div></div>
       </div>
-
       <div class="section">
         <h2>🎯 Быстрые действия</h2>
         <div class="btn-group">
           <button class="btn btn-success" onclick="action('connect-all')">▶ Подключить всех</button>
           <button class="btn btn-danger" onclick="action('disconnect-all')">⏹ Отключить всех</button>
           <button class="btn btn-warning" onclick="action('reconnect-all')">🔄 Переподключить</button>
+          <button class="btn btn-pink" onclick="action('follow-all')">❤️ Зафолловить всех</button>
         </div>
       </div>
-
       <div class="section">
         <h2>📺 Канал</h2>
         <div class="form-row">
@@ -141,31 +106,13 @@
     <div class="tabs" id="tab-accounts">
       <div class="section">
         <h2>➕ Добавить аккаунты</h2>
-        <p style="color:#666; margin-bottom:8px; font-size:12px;">Формат: LOGIN:PASS:TOKEN:ID:DATE (каждый с новой строки или через |)</p>
+        <p style="color:#666;margin-bottom:8px;font-size:12px;">LOGIN:PASS:TOKEN:ID:DATE (каждый с новой строки или через |)</p>
         <textarea id="new-accounts" placeholder="login1:pass1:token1:id1:date1"></textarea>
-        <div class="btn-group">
-          <button class="btn btn-success" onclick="addAccounts()">➕ Добавить</button>
-        </div>
+        <div class="btn-group"><button class="btn btn-success" onclick="addAccounts()">➕ Добавить</button></div>
       </div>
-
       <div class="section">
-        <h2>👥 Список аккаунтов</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Логин</th>
-                <th>Статус</th>
-                <th>Фаза</th>
-                <th>Таймер</th>
-                <th>Смотрит/АФК (мин)</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody id="accounts-table"></tbody>
-          </table>
-        </div>
+        <h2>👥 Список</h2>
+        <div class="table-wrap"><table><thead><tr><th>#</th><th>Логин</th><th>Статус</th><th>Фаза</th><th>Таймер</th><th>Смотрит/АФК</th><th>Действия</th></tr></thead><tbody id="accounts-table"></tbody></table></div>
       </div>
     </div>
 
@@ -173,29 +120,15 @@
     <div class="tabs" id="tab-queue">
       <div class="section">
         <h2>📥 Очередь захода/выхода</h2>
-        <p style="color:#888; margin-bottom:15px; font-size:13px;">
-          Аккаунты будут заходить/выходить по одному через заданный интервал в рандомном порядке.
-        </p>
-
-        <div class="form-row">
-          <label>Интервал захода:</label>
-          <input id="q-join-interval" type="number" value="2" min="1"> мин (между каждым заходом)
-        </div>
-        <div class="form-row">
-          <label>Интервал выхода:</label>
-          <input id="q-leave-interval" type="number" value="2" min="1"> мин (между каждым выходом)
-        </div>
-
+        <p style="color:#888;margin-bottom:15px;font-size:13px;">Аккаунты заходят/выходят по одному через интервал в рандомном порядке.</p>
+        <div class="form-row"><label>Интервал захода:</label><input id="q-join-interval" type="number" value="2" min="1" style="width:60px"> мин</div>
+        <div class="form-row"><label>Интервал выхода:</label><input id="q-leave-interval" type="number" value="2" min="1" style="width:60px"> мин</div>
         <div class="btn-group" style="margin-top:15px;">
-          <button class="btn btn-success" onclick="startQueue('join')">📥 Запустить очередь ЗАХОДА</button>
-          <button class="btn btn-danger" onclick="startQueue('leave')">📤 Запустить очередь ВЫХОДА</button>
-          <button class="btn btn-warning" onclick="stopQueues()">⏹ Остановить очереди</button>
+          <button class="btn btn-success" onclick="startQueue('join')">📥 Очередь ЗАХОДА</button>
+          <button class="btn btn-danger" onclick="startQueue('leave')">📤 Очередь ВЫХОДА</button>
+          <button class="btn btn-warning" onclick="stopQueues()">⏹ Остановить</button>
         </div>
-
-        <div style="margin-top:15px; color:#888; font-size:12px;">
-          <p>В очереди на заход: <b id="q-join-count">0</b></p>
-          <p>В очереди на выход: <b id="q-leave-count">0</b></p>
-        </div>
+        <p style="margin-top:10px;color:#888;font-size:12px;">В очереди: заход <b id="q-join-count">0</b> | выход <b id="q-leave-count">0</b></p>
       </div>
     </div>
 
@@ -203,44 +136,53 @@
     <div class="tabs" id="tab-cycle">
       <div class="section">
         <h2>🔄 Цикл заход/выход</h2>
-        <p style="color:#888; margin-bottom:15px; font-size:13px;">
-          Каждый аккаунт будет автоматически: смотреть стрим → уходить в АФК → возвращаться → повтор.<br>
-          Время задаётся индивидуально для каждого аккаунта или глобально.
-        </p>
-
-        <div class="form-row">
-          <label>Глобальное время просмотра:</label>
-          <input id="c-watch-time" type="number" value="20" min="1"> мин
-        </div>
-        <div class="form-row">
-          <label>Глобальное время АФК:</label>
-          <input id="c-afk-time" type="number" value="10" min="1"> мин
-        </div>
-
+        <p style="color:#888;margin-bottom:15px;font-size:13px;">Каждый аккаунт: смотрит → АФК → возвращается → повтор.</p>
+        <div class="form-row"><label>Время просмотра:</label><input id="c-watch-time" type="number" value="20" min="1" style="width:60px"> мин</div>
+        <div class="form-row"><label>Время АФК:</label><input id="c-afk-time" type="number" value="10" min="1" style="width:60px"> мин</div>
         <div class="btn-group" style="margin-top:15px;">
-          <button class="btn btn-success" onclick="startCycle()">▶ Запустить цикл для всех</button>
-          <button class="btn btn-danger" onclick="stopCycle()">⏹ Остановить цикл</button>
-        </div>
-
-        <div style="margin-top:15px; padding:12px; background:#16213e; border-radius:8px; font-size:12px; color:#aaa;">
-          <b style="color:#9146ff;">Как работает:</b><br>
-          1. Аккаунты заходят на стрим с рандомной задержкой (не все сразу)<br>
-          2. Каждый сидит <b>watch_time</b> минут (+0-2 мин рандом)<br>
-          3. Уходит в АФК на <b>afk_time</b> минут (+0-2 мин рандом)<br>
-          4. Возвращается и повторяет цикл<br>
-          5. Можно задать индивидуальное время для каждого аккаунта в таблице
+          <button class="btn btn-success" onclick="startCycle()">▶ Запустить цикл</button>
+          <button class="btn btn-danger" onclick="stopCycle()">⏹ Остановить</button>
         </div>
       </div>
-
       <div class="section">
         <h2>⏱ Статус цикла</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Логин</th><th>Фаза</th><th>Осталось</th><th>Смотрит (мин)</th><th>АФК (мин)</th><th>Действия</th></tr>
-            </thead>
-            <tbody id="cycle-table"></tbody>
-          </table>
+        <div class="table-wrap"><table><thead><tr><th>Логин</th><th>Фаза</th><th>Осталось</th><th>Смотрит</th><th>АФК</th><th></th></tr></thead><tbody id="cycle-table"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ЧАТ -->
+    <div class="tabs" id="tab-chat">
+      <div class="section">
+        <h2>💬 Отправить сообщение в чат</h2>
+        <p style="color:#888;margin-bottom:15px;font-size:13px;">Отправить сообщение от имени аккаунта в чат канала.</p>
+        <div class="chat-box">
+          <div class="form-row">
+            <label>Аккаунт:</label>
+            <select id="chat-account" style="flex:1"></select>
+          </div>
+          <div class="chat-input">
+            <input id="chat-message" placeholder="Введите сообщение..." style="flex:1">
+            <button class="btn btn-primary" onclick="sendChat()">Отправить</button>
+          </div>
+          <div style="margin-top:15px;border-top:1px solid #333;padding-top:15px;">
+            <p style="color:#aaa;font-size:13px;margin-bottom:8px;"><b>Отправить от ВСЕХ подключённых:</b></p>
+            <div class="chat-input">
+              <input id="chat-message-all" placeholder="Сообщение от всех..." style="flex:1">
+              <button class="btn btn-warning" onclick="sendChatAll()">Отправить от всех</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <h2>❤️ Фолловинг</h2>
+        <p style="color:#888;margin-bottom:10px;font-size:13px;">Зафолловить канал от имени аккаунтов. Требуется Client-ID в настройках.</p>
+        <div class="form-row">
+          <label>Аккаунт:</label>
+          <select id="follow-account" style="flex:1"></select>
+          <button class="btn btn-pink" onclick="followOne()">❤️ Зафолловить</button>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-pink" onclick="action('follow-all')">❤️ Зафолловить ВСЕХ</button>
         </div>
       </div>
     </div>
@@ -249,11 +191,12 @@
     <div class="tabs" id="tab-settings">
       <div class="section">
         <h2>⚙️ Настройки</h2>
-        <div class="form-row"><label>Канал:</label><input id="set-channel" placeholder="канал"></div>
-        <div class="form-row"><label>Интервал захода (мин):</label><input id="set-queue-join" type="number" min="1"></div>
-        <div class="form-row"><label>Интервал выхода (мин):</label><input id="set-queue-leave" type="number" min="1"></div>
-        <div class="form-row"><label>Глоб. время просмотра:</label><input id="set-watch" type="number" min="1"> мин</div>
-        <div class="form-row"><label>Глоб. время АФК:</label><input id="set-afk" type="number" min="1"> мин</div>
+        <div class="form-row"><label>Канал:</label><input id="set-channel" placeholder="канал" style="flex:1"></div>
+        <div class="form-row"><label>Интервал захода (мин):</label><input id="set-queue-join" type="number" min="1" style="width:60px"></div>
+        <div class="form-row"><label>Интервал выхода (мин):</label><input id="set-queue-leave" type="number" min="1" style="width:60px"></div>
+        <div class="form-row"><label>Глоб. просмотр (мин):</label><input id="set-watch" type="number" min="1" style="width:60px"></div>
+        <div class="form-row"><label>Глоб. АФК (мин):</label><input id="set-afk" type="number" min="1" style="width:60px"></div>
+        <div class="form-row"><label>Twitch Client-ID:</label><input id="set-client-id" placeholder="для фолловинга" style="flex:1"></div>
         <div class="btn-group"><button class="btn btn-primary" onclick="saveSettings()">💾 Сохранить</button></div>
       </div>
     </div>
@@ -267,173 +210,204 @@
       </div>
     </div>
   </div>
-
   <div class="toast" id="toast"></div>
-
-  <script>
-    const pass = localStorage.getItem("pass") || new URLSearchParams(window.location.search).get("pass") || "";
-    if (!pass) window.location.href = "/";
-
-    async function api(url, data = null) {
-      const opts = { headers: { "x-pass": pass } };
-      if (data) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(data); }
-      const res = await fetch(url, opts);
-      return res.json();
-    }
-
-    function toast(msg, color = "#4caf50") {
-      const el = document.getElementById("toast");
-      el.textContent = msg; el.style.background = color; el.style.display = "block";
-      setTimeout(() => el.style.display = "none", 3000);
-    }
-
-    function showTab(name) {
-      document.querySelectorAll(".tabs").forEach(t => t.classList.remove("active"));
-      document.getElementById("tab-" + name).classList.add("active");
-      document.querySelectorAll(".nav-links button").forEach(b => b.classList.remove("active"));
-      event.target.classList.add("active");
-      if (name === "accounts") loadAccounts();
-      if (name === "cycle") loadCycle();
-      if (name === "logs") loadLogs();
-    }
-
-    function formatTime(seconds) {
-      if (!seconds || seconds <= 0) return "—";
-      const m = Math.floor(seconds / 60);
-      const s = seconds % 60;
-      return m > 0 ? `${m}м ${s}с` : `${s}с`;
-    }
-
-    // === ЗАГРУЗКА ===
-    async function loadStatus() {
-      const data = await api("/api/status");
-      document.getElementById("st-connected").textContent = data.connected;
-      document.getElementById("st-total").textContent = data.total;
-      document.getElementById("st-disconnected").textContent = data.disconnected;
-      document.getElementById("st-errors").textContent = data.errors;
-      document.getElementById("st-cycling").textContent = data.cycling;
-      document.getElementById("dash-channel").value = data.settings.channel || "";
-      document.getElementById("set-channel").value = data.settings.channel || "";
-      document.getElementById("set-queue-join").value = data.settings.queue_join_interval || "2";
-      document.getElementById("set-queue-leave").value = data.settings.queue_leave_interval || "2";
-      document.getElementById("set-watch").value = data.settings.global_watch_time || "20";
-      document.getElementById("set-afk").value = data.settings.global_afk_time || "10";
-      document.getElementById("c-watch-time").value = data.settings.global_watch_time || "20";
-      document.getElementById("c-afk-time").value = data.settings.global_afk_time || "10";
-      document.getElementById("q-join-interval").value = data.settings.queue_join_interval || "2";
-      document.getElementById("q-leave-interval").value = data.settings.queue_leave_interval || "2";
-      document.getElementById("q-join-count").textContent = data.queue.joinQueue;
-      document.getElementById("q-leave-count").textContent = data.queue.leaveQueue;
-    }
-
-    async function loadAccounts() {
-      const accounts = await api("/api/accounts");
-      const tbody = document.getElementById("accounts-table");
-      tbody.innerHTML = accounts.map((a, i) => {
-        const sc = a.status === "подключен" ? "status-online" : a.status.includes("ошибка") ? "status-error" : a.status.includes("подключение") ? "status-connecting" : "status-offline";
-        const phaseText = a.current_phase === "watching" ? "👀 Смотрит" : a.current_phase === "afk" ? "💤 АФК" : a.current_phase === "joining" ? "📥 Заходит" : "—";
-        const phaseClass = a.current_phase === "watching" ? "status-watching" : a.current_phase === "afk" ? "status-afk" : a.cycle_active ? "status-cycle" : "";
-
-        return `<tr>
-          <td>${i + 1}</td>
-          <td><b>${a.login}</b></td>
-          <td><span class="status ${sc}">${a.status}</span></td>
-          <td><span class="status ${phaseClass}">${phaseText}</span></td>
-          <td class="timer-badge">${formatTime(a.time_left)}</td>
-          <td>
-            <input type="number" value="${a.watch_time}" style="width:45px" onchange="setTimes(${a.id}, this.value, this.parentElement.querySelectorAll('input')[1].value)">
-            /
-            <input type="number" value="${a.afk_time}" style="width:45px" onchange="setTimes(${a.id}, this.parentElement.querySelectorAll('input')[0].value, this.value)">
-          </td>
-          <td>
-            <button class="btn btn-sm btn-success" onclick="connectOne(${a.id})" title="Подключить">▶</button>
-            <button class="btn btn-sm btn-danger" onclick="disconnectOne(${a.id})" title="Отключить">⏹</button>
-            <button class="btn btn-sm btn-primary" onclick="startCycleOne(${a.id})" title="Запустить цикл">🔄</button>
-            <button class="btn btn-sm btn-warning" onclick="stopCycleOne(${a.id})" title="Остановить цикл">⏸</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteAcc(${a.id})" title="Удалить">🗑</button>
-          </td>
-        </tr>`;
-      }).join("");
-    }
-
-    async function loadCycle() {
-      const accounts = await api("/api/accounts");
-      const cycling = accounts.filter(a => a.cycle_active);
-      const tbody = document.getElementById("cycle-table");
-      tbody.innerHTML = cycling.map(a => {
-        const phaseText = a.current_phase === "watching" ? "👀 Смотрит" : a.current_phase === "afk" ? "💤 АФК" : a.current_phase === "joining" ? "📥 Заходит" : "⏸ Стоп";
-        return `<tr>
-          <td><b>${a.login}</b></td>
-          <td>${phaseText}</td>
-          <td class="timer-badge">${formatTime(a.time_left)}</td>
-          <td><input type="number" value="${a.watch_time}" style="width:50px" onchange="setTimes(${a.id}, this.value, null)"></td>
-          <td><input type="number" value="${a.afk_time}" style="width:50px" onchange="setTimes(${a.id}, null, this.value)"></td>
-          <td><button class="btn btn-sm btn-danger" onclick="stopCycleOne(${a.id})">⏹ Стоп</button></td>
-        </tr>`;
-      }).join("") || '<tr><td colspan="6" style="text-align:center;color:#666;">Нет аккаунтов в цикле</td></tr>';
-    }
-
-    async function loadLogs() {
-      const logs = await api("/api/logs");
-      document.getElementById("logs-list").innerHTML = logs.map(l =>
-        `<div class="log-item"><span class="time">${l.created_at}</span> [${l.type}] ${l.message}</div>`
-      ).join("");
-    }
-
-    // === ДЕЙСТВИЯ ===
-    async function action(name) { await api("/api/action/" + name, {}); toast("Выполнено!"); setTimeout(loadStatus, 2000); }
-    async function saveChannel() { await api("/api/settings", { channel: document.getElementById("dash-channel").value }); toast("Канал сохранён!"); loadStatus(); }
-
-    async function saveSettings() {
-      await api("/api/settings", {
-        channel: document.getElementById("set-channel").value,
-        queue_join_interval: document.getElementById("set-queue-join").value,
-        queue_leave_interval: document.getElementById("set-queue-leave").value,
-        global_watch_time: document.getElementById("set-watch").value,
-        global_afk_time: document.getElementById("set-afk").value,
-      });
-      toast("Сохранено!");
-    }
-
-    async function addAccounts() {
-      const text = document.getElementById("new-accounts").value;
-      if (!text.trim()) return;
-      const res = await api("/api/accounts/add", { accounts: text });
-      toast(`Добавлено: ${res.added}`); document.getElementById("new-accounts").value = ""; loadAccounts(); loadStatus();
-    }
-
-    async function connectOne(id) { await api("/api/accounts/connect", { id }); toast("Подключение..."); setTimeout(loadAccounts, 3000); }
-    async function disconnectOne(id) { await api("/api/accounts/disconnect", { id }); toast("Отключен"); loadAccounts(); }
-    async function deleteAcc(id) { if (!confirm("Удалить?")) return; await api("/api/accounts/delete", { id }); toast("Удалён", "#f44336"); loadAccounts(); loadStatus(); }
-
-    async function setTimes(id, watch, afk) {
-      const acc = (await api("/api/accounts")).find(a => a.id === id);
-      await api("/api/accounts/set-times", { id, watch_time: parseInt(watch) || acc.watch_time, afk_time: parseInt(afk) || acc.afk_time });
-      toast("Время обновлено");
-    }
-
-    async function startCycleOne(id) { await api("/api/accounts/start-cycle", { id }); toast("Цикл запущен"); loadAccounts(); }
-    async function stopCycleOne(id) { await api("/api/accounts/stop-cycle", { id }); toast("Цикл остановлен"); loadAccounts(); }
-
-    async function startQueue(type) {
-      await api("/api/settings", { queue_join_interval: document.getElementById("q-join-interval").value, queue_leave_interval: document.getElementById("q-leave-interval").value });
-      await api("/api/queue/start-" + type, {});
-      toast("Очередь запущена!");
-    }
-    async function stopQueues() { await api("/api/queue/stop", {}); toast("Очереди остановлены"); }
-
-    async function startCycle() {
-      await api("/api/settings", { global_watch_time: document.getElementById("c-watch-time").value, global_afk_time: document.getElementById("c-afk-time").value });
-      await api("/api/cycle/start", {});
-      toast("Цикл запущен для всех!"); setTimeout(loadCycle, 2000);
-    }
-    async function stopCycle() { await api("/api/cycle/stop", {}); toast("Цикл остановлен"); loadCycle(); }
-
-    // Инициализация
-    loadStatus();
-    setInterval(loadStatus, 8000);
-    setInterval(() => { if (document.getElementById("tab-accounts").classList.contains("active")) loadAccounts(); }, 10000);
-    setInterval(() => { if (document.getElementById("tab-cycle").classList.contains("active")) loadCycle(); }, 10000);
-  </script>
 </body>
 </html>
+
+<script>
+  const pass = localStorage.getItem("pass") || new URLSearchParams(window.location.search).get("pass") || "";
+  if (!pass) window.location.href = "/";
+
+  async function api(url, data = null) {
+    const opts = { headers: { "x-pass": pass } };
+    if (data) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(data); }
+    const res = await fetch(url, opts);
+    return res.json();
+  }
+
+  function toast(msg, color = "#4caf50") {
+    const el = document.getElementById("toast");
+    el.textContent = msg; el.style.background = color; el.style.display = "block";
+    setTimeout(() => el.style.display = "none", 3000);
+  }
+
+  function showTab(name) {
+    document.querySelectorAll(".tabs").forEach(t => t.classList.remove("active"));
+    document.getElementById("tab-" + name).classList.add("active");
+    document.querySelectorAll(".nav-links button").forEach(b => b.classList.remove("active"));
+    event.target.classList.add("active");
+    if (name === "accounts") loadAccounts();
+    if (name === "cycle") loadCycle();
+    if (name === "chat") loadChatAccounts();
+    if (name === "logs") loadLogs();
+  }
+
+  function formatTime(seconds) {
+    if (!seconds || seconds <= 0) return "—";
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m > 0 ? `${m}м ${s}с` : `${s}с`;
+  }
+
+  async function loadStatus() {
+    const data = await api("/api/status");
+    document.getElementById("st-connected").textContent = data.connected;
+    document.getElementById("st-total").textContent = data.total;
+    document.getElementById("st-disconnected").textContent = data.disconnected;
+    document.getElementById("st-errors").textContent = data.errors;
+    document.getElementById("st-cycling").textContent = data.cycling;
+    document.getElementById("dash-channel").value = data.settings.channel || "";
+    document.getElementById("set-channel").value = data.settings.channel || "";
+    document.getElementById("set-queue-join").value = data.settings.queue_join_interval || "2";
+    document.getElementById("set-queue-leave").value = data.settings.queue_leave_interval || "2";
+    document.getElementById("set-watch").value = data.settings.global_watch_time || "20";
+    document.getElementById("set-afk").value = data.settings.global_afk_time || "10";
+    document.getElementById("set-client-id").value = data.settings.client_id || "";
+    document.getElementById("c-watch-time").value = data.settings.global_watch_time || "20";
+    document.getElementById("c-afk-time").value = data.settings.global_afk_time || "10";
+    document.getElementById("q-join-interval").value = data.settings.queue_join_interval || "2";
+    document.getElementById("q-leave-interval").value = data.settings.queue_leave_interval || "2";
+    document.getElementById("q-join-count").textContent = data.queue.joinQueue;
+    document.getElementById("q-leave-count").textContent = data.queue.leaveQueue;
+  }
+
+  async function loadAccounts() {
+    const accounts = await api("/api/accounts");
+    const tbody = document.getElementById("accounts-table");
+    tbody.innerHTML = accounts.map((a, i) => {
+      const sc = a.status === "подключен" ? "status-online" : a.status.includes("ошибка") ? "status-error" : a.status.includes("подключение") ? "status-connecting" : "status-offline";
+      const phaseText = a.current_phase === "watching" ? "👀 Смотрит" : a.current_phase === "afk" ? "💤 АФК" : a.current_phase === "joining" ? "📥 Заходит" : "—";
+      const phaseClass = a.current_phase === "watching" ? "status-watching" : a.current_phase === "afk" ? "status-afk" : "";
+      return `<tr>
+        <td>${i+1}</td>
+        <td><b>${a.login}</b></td>
+        <td><span class="status ${sc}">${a.status}</span></td>
+        <td><span class="status ${phaseClass}">${phaseText}</span></td>
+        <td class="timer-badge">${formatTime(a.time_left)}</td>
+        <td><input type="number" value="${a.watch_time}" style="width:40px" onchange="setTimes(${a.id},this.value,this.parentElement.querySelectorAll('input')[1].value)">/<input type="number" value="${a.afk_time}" style="width:40px" onchange="setTimes(${a.id},this.parentElement.querySelectorAll('input')[0].value,this.value)"></td>
+        <td>
+          <button class="btn btn-sm btn-success" onclick="connectOne(${a.id})">▶</button>
+          <button class="btn btn-sm btn-danger" onclick="disconnectOne(${a.id})">⏹</button>
+          <button class="btn btn-sm btn-primary" onclick="startCycleOne(${a.id})">🔄</button>
+          <button class="btn btn-sm btn-warning" onclick="stopCycleOne(${a.id})">⏸</button>
+          <button class="btn btn-sm btn-pink" onclick="followAcc(${a.id})">❤️</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteAcc(${a.id})">🗑</button>
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  async function loadCycle() {
+    const accounts = await api("/api/accounts");
+    const cycling = accounts.filter(a => a.cycle_active);
+    const tbody = document.getElementById("cycle-table");
+    tbody.innerHTML = cycling.map(a => {
+      const ph = a.current_phase === "watching" ? "👀 Смотрит" : a.current_phase === "afk" ? "💤 АФК" : "📥 Заходит";
+      return `<tr><td><b>${a.login}</b></td><td>${ph}</td><td class="timer-badge">${formatTime(a.time_left)}</td><td>${a.watch_time}м</td><td>${a.afk_time}м</td><td><button class="btn btn-sm btn-danger" onclick="stopCycleOne(${a.id})">⏹</button></td></tr>`;
+    }).join("") || '<tr><td colspan="6" style="text-align:center;color:#666;">Нет аккаунтов в цикле</td></tr>';
+  }
+
+  async function loadChatAccounts() {
+    const accounts = await api("/api/accounts");
+    const connected = accounts.filter(a => a.status === "подключен");
+    const sel1 = document.getElementById("chat-account");
+    const sel2 = document.getElementById("follow-account");
+    const opts = connected.map(a => `<option value="${a.id}">${a.login}</option>`).join("");
+    const optsAll = accounts.map(a => `<option value="${a.id}">${a.login} (${a.status})</option>`).join("");
+    sel1.innerHTML = opts || '<option>Нет подключённых</option>';
+    sel2.innerHTML = optsAll || '<option>Нет аккаунтов</option>';
+  }
+
+  async function loadLogs() {
+    const logs = await api("/api/logs");
+    document.getElementById("logs-list").innerHTML = logs.map(l =>
+      `<div class="log-item"><span class="time">${l.created_at}</span> [${l.type}] ${l.message}</div>`
+    ).join("");
+  }
+
+  // Действия
+  async function action(name) { await api("/api/action/" + name, {}); toast("Выполнено!"); setTimeout(loadStatus, 2000); }
+  async function saveChannel() { await api("/api/settings", { channel: document.getElementById("dash-channel").value }); toast("Канал сохранён!"); loadStatus(); }
+
+  async function saveSettings() {
+    await api("/api/settings", {
+      channel: document.getElementById("set-channel").value,
+      queue_join_interval: document.getElementById("set-queue-join").value,
+      queue_leave_interval: document.getElementById("set-queue-leave").value,
+      global_watch_time: document.getElementById("set-watch").value,
+      global_afk_time: document.getElementById("set-afk").value,
+      client_id: document.getElementById("set-client-id").value,
+    });
+    toast("Сохранено!");
+  }
+
+  async function addAccounts() {
+    const text = document.getElementById("new-accounts").value;
+    if (!text.trim()) return;
+    const res = await api("/api/accounts/add", { accounts: text });
+    toast(`Добавлено: ${res.added}`); document.getElementById("new-accounts").value = ""; loadAccounts(); loadStatus();
+  }
+
+  async function connectOne(id) { await api("/api/accounts/connect", { id }); toast("Подключение..."); setTimeout(loadAccounts, 3000); }
+  async function disconnectOne(id) { await api("/api/accounts/disconnect", { id }); toast("Отключен"); loadAccounts(); }
+  async function deleteAcc(id) { if (!confirm("Удалить?")) return; await api("/api/accounts/delete", { id }); toast("Удалён","#f44336"); loadAccounts(); loadStatus(); }
+  async function followAcc(id) { const r = await api("/api/accounts/follow", { id }); toast(r.ok ? "Зафолловлен!" : r.error, r.ok ? "#e91e63" : "#f44336"); }
+
+  async function setTimes(id, watch, afk) {
+    await api("/api/accounts/set-times", { id, watch_time: parseInt(watch)||20, afk_time: parseInt(afk)||10 });
+    toast("Время обновлено");
+  }
+
+  async function startCycleOne(id) { await api("/api/accounts/start-cycle", { id }); toast("Цикл запущен"); loadAccounts(); }
+  async function stopCycleOne(id) { await api("/api/accounts/stop-cycle", { id }); toast("Цикл стоп"); loadAccounts(); }
+
+  async function startQueue(type) {
+    await api("/api/settings", { queue_join_interval: document.getElementById("q-join-interval").value, queue_leave_interval: document.getElementById("q-leave-interval").value });
+    await api("/api/queue/start-" + type, {});
+    toast("Очередь запущена!");
+  }
+  async function stopQueues() { await api("/api/queue/stop", {}); toast("Остановлено"); }
+
+  async function startCycle() {
+    await api("/api/settings", { global_watch_time: document.getElementById("c-watch-time").value, global_afk_time: document.getElementById("c-afk-time").value });
+    await api("/api/cycle/start", {});
+    toast("Цикл запущен!"); setTimeout(loadCycle, 2000);
+  }
+  async function stopCycle() { await api("/api/cycle/stop", {}); toast("Цикл стоп"); loadCycle(); }
+
+  // ЧАТ
+  async function sendChat() {
+    const id = parseInt(document.getElementById("chat-account").value);
+    const message = document.getElementById("chat-message").value;
+    if (!message) return;
+    const r = await api("/api/chat/send", { id, message });
+    if (r.ok) { toast("Отправлено!"); document.getElementById("chat-message").value = ""; }
+    else toast(r.error, "#f44336");
+  }
+
+  async function sendChatAll() {
+    const message = document.getElementById("chat-message-all").value;
+    if (!message) return;
+    const r = await api("/api/chat/send-all", { message });
+    toast(`Отправляется ${r.sending} аккаунтам`);
+    document.getElementById("chat-message-all").value = "";
+  }
+
+  async function followOne() {
+    const id = parseInt(document.getElementById("follow-account").value);
+    const r = await api("/api/accounts/follow", { id });
+    toast(r.ok ? "Зафолловлен!" : r.error, r.ok ? "#e91e63" : "#f44336");
+  }
+
+  // Enter для отправки
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("chat-message").addEventListener("keypress", e => { if (e.key === "Enter") sendChat(); });
+    document.getElementById("chat-message-all").addEventListener("keypress", e => { if (e.key === "Enter") sendChatAll(); });
+  });
+
+  // Инициализация
+  loadStatus();
+  setInterval(loadStatus, 8000);
+  setInterval(() => { if (document.getElementById("tab-accounts").classList.contains("active")) loadAccounts(); }, 10000);
+  setInterval(() => { if (document.getElementById("tab-cycle").classList.contains("active")) loadCycle(); }, 10000);
+</script>

@@ -1,4 +1,5 @@
 const tmi = require("tmi.js");
+const https = require("https");
 const db = require("./database");
 
 const clients = new Map(); // id -> { client, pingInterval }
@@ -99,20 +100,157 @@ function connectOne(id) {
   if (account) connectAccount(account);
 }
 
-// === ОЧЕРЕДЬ ЗАХОДА (по одному через интервал) ===
+// === ОТПРАВКА СООБЩЕНИЯ В ЧАТ ===
+function sendMessage(id, message) {
+  const info = clients.get(id);
+  if (!info) return { ok: false, error: "Аккаунт не подключен" };
+
+  const channel = db.getSetting("channel");
+  if (!channel) return { ok: false, error: "Канал не задан" };
+
+  return info.client.say(channel, message).then(() => {
+    const account = db.getAccountById(id);
+    db.addLog("chat", `${account.login}: ${message}`);
+    return { ok: true };
+  }).catch(err => {
+    return { ok: false, error: err.message };
+  });
+}
+
+function sendMessageAll(message) {
+  const accounts = db.getAccounts().filter(a => a.status === "подключен");
+  let sent = 0;
+
+  accounts.forEach((account, index) => {
+    setTimeout(() => {
+      const info = clients.get(account.id);
+      if (info) {
+        const channel = db.getSetting("channel");
+        info.client.say(channel, message).then(() => {
+          sent++;
+          db.addLog("chat", `${account.login}: ${message}`);
+        }).catch(() => {});
+      }
+    }, index * 2000); // 2 сек между сообщениями чтобы не забанили
+  });
+
+  return { ok: true, sending: accounts.length };
+}
+
+// === ФОЛЛОВИНГ ЧЕРЕЗ TWITCH API ===
+function followChannel(account) {
+  return new Promise((resolve) => {
+    const channel = db.getSetting("channel");
+    if (!channel) return resolve({ ok: false, error: "Канал не задан" });
+
+    const token = account.token.startsWith("oauth:") ? account.token.slice(6) : account.token;
+
+    // Сначала получаем ID канала
+    getUserId(channel, token).then(channelId => {
+      if (!channelId) return resolve({ ok: false, error: "Не удалось получить ID канала" });
+
+      // Фолловим
+      const data = JSON.stringify({
+        from_id: account.twitch_id || "",
+        to_id: channelId
+      });
+
+      const options = {
+        hostname: "api.twitch.tv",
+        path: "/helix/channels/followed",
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Client-Id": db.getSetting("client_id") || "",
+          "Content-Type": "application/json",
+          "Content-Length": data.length,
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let body = "";
+        res.on("data", chunk => body += chunk);
+        res.on("end", () => {
+          if (res.statusCode === 204 || res.statusCode === 200) {
+            db.addLog("follow", `${account.login} зафолловил ${channel}`);
+            resolve({ ok: true });
+          } else {
+            db.addLog("error", `Follow ${account.login}: ${res.statusCode} ${body}`);
+            resolve({ ok: false, error: `HTTP ${res.statusCode}` });
+          }
+        });
+      });
+
+      req.on("error", (err) => {
+        resolve({ ok: false, error: err.message });
+      });
+
+      req.write(data);
+      req.end();
+    });
+  });
+}
+
+function getUserId(login, token) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: "api.twitch.tv",
+      path: `/helix/users?login=${login}`,
+      method: "GET",
+      headers: {
+        "Authorization": "Bearer " + token,
+        "Client-Id": db.getSetting("client_id") || "",
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(body);
+          if (data.data && data.data[0]) {
+            resolve(data.data[0].id);
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    });
+
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
+function followAll() {
+  const accounts = db.getEnabledAccounts();
+  db.addLog("follow", `Фолловинг: ${accounts.length} аккаунтов`);
+
+  accounts.forEach((account, index) => {
+    setTimeout(() => {
+      followChannel(account);
+    }, index * 3000);
+  });
+
+  return { ok: true, count: accounts.length };
+}
+
+// === ОЧЕРЕДЬ ЗАХОДА ===
 let joinQueue = [];
 let leaveQueue = [];
 
 function startQueueJoin() {
   const accounts = db.getEnabledAccounts().filter(a => a.status !== "подключен");
-  // Рандомный порядок
   joinQueue = accounts.sort(() => Math.random() - 0.5);
   const interval = (parseInt(db.getSetting("queue_join_interval")) || 2) * 60 * 1000;
 
-  db.addLog("queue", `Очередь на заход: ${joinQueue.length} аккаунтов, интервал ${interval / 60000} мин`);
+  db.addLog("queue", `Очередь на заход: ${joinQueue.length}, интервал ${interval / 60000} мин`);
 
   clearInterval(queueJoinTimer);
-  processJoinQueue(); // первый сразу
+  processJoinQueue();
 
   queueJoinTimer = setInterval(() => {
     processJoinQueue();
@@ -136,7 +274,7 @@ function startQueueLeave() {
   leaveQueue = accounts.sort(() => Math.random() - 0.5);
   const interval = (parseInt(db.getSetting("queue_leave_interval")) || 2) * 60 * 1000;
 
-  db.addLog("queue", `Очередь на выход: ${leaveQueue.length} аккаунтов, интервал ${interval / 60000} мин`);
+  db.addLog("queue", `Очередь на выход: ${leaveQueue.length}, интервал ${interval / 60000} мин`);
 
   clearInterval(queueLeaveTimer);
   processLeaveQueue();
@@ -168,21 +306,14 @@ function stopQueues() {
   db.addLog("queue", "Очереди остановлены");
 }
 
-// === ЦИКЛ ЗАХОД/ВЫХОД (для каждого аккаунта индивидуально) ===
-// Каждый аккаунт: сидит watch_time мин -> уходит на afk_time мин -> возвращается -> повтор
-
+// === ЦИКЛ ===
 function startCycleAll() {
   const accounts = db.getEnabledAccounts();
-  const globalWatch = parseInt(db.getSetting("global_watch_time")) || 20;
-  const globalAfk = parseInt(db.getSetting("global_afk_time")) || 10;
   const now = Date.now();
 
   accounts.forEach((account, index) => {
-    const watchTime = account.watch_time || globalWatch;
-    // Рандомный старт чтобы не все одновременно
     const randomDelay = index * 30 * 1000 + Math.random() * 60 * 1000;
     const nextAction = now + randomDelay;
-
     db.setCycleActive(account.id, true);
     db.setPhase(account.id, "joining", nextAction);
   });
@@ -201,7 +332,7 @@ function startCycleProcessor() {
   if (cycleTimer) return;
   cycleTimer = setInterval(() => {
     processCycles();
-  }, 15 * 1000); // проверяем каждые 15 сек
+  }, 15 * 1000);
 }
 
 function stopCycleProcessor() {
@@ -216,7 +347,7 @@ function processCycles() {
   const accounts = db.getCycleAccounts();
 
   accounts.forEach(account => {
-    if (account.next_action_at > now) return; // ещё не время
+    if (account.next_action_at > now) return;
 
     const globalWatch = parseInt(db.getSetting("global_watch_time")) || 20;
     const globalAfk = parseInt(db.getSetting("global_afk_time")) || 10;
@@ -224,25 +355,22 @@ function processCycles() {
     const afkTime = account.afk_time || globalAfk;
 
     if (account.current_phase === "joining") {
-      // Пора подключиться
-      connectAccount(account);
-      const watchMs = watchTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000); // +0-2 мин рандом
-      db.setPhase(account.id, "watching", now + watchMs);
-      db.addLog("cycle", `${account.login} зашёл, будет смотреть ${Math.round(watchMs / 60000)} мин`);
-    }
-    else if (account.current_phase === "watching") {
-      // Время вышло — уходим в АФК
-      disconnectAccount(account.id);
-      const afkMs = afkTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000);
-      db.setPhase(account.id, "afk", now + afkMs);
-      db.addLog("cycle", `${account.login} ушёл в АФК на ${Math.round(afkMs / 60000)} мин`);
-    }
-    else if (account.current_phase === "afk") {
-      // АФК закончился — снова заходим
       connectAccount(account);
       const watchMs = watchTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000);
       db.setPhase(account.id, "watching", now + watchMs);
-      db.addLog("cycle", `${account.login} вернулся, будет смотреть ${Math.round(watchMs / 60000)} мин`);
+      db.addLog("cycle", `${account.login} зашёл, смотрит ${Math.round(watchMs / 60000)} мин`);
+    }
+    else if (account.current_phase === "watching") {
+      disconnectAccount(account.id);
+      const afkMs = afkTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000);
+      db.setPhase(account.id, "afk", now + afkMs);
+      db.addLog("cycle", `${account.login} АФК ${Math.round(afkMs / 60000)} мин`);
+    }
+    else if (account.current_phase === "afk") {
+      connectAccount(account);
+      const watchMs = watchTime * 60 * 1000 + (Math.random() * 2 * 60 * 1000);
+      db.setPhase(account.id, "watching", now + watchMs);
+      db.addLog("cycle", `${account.login} вернулся, смотрит ${Math.round(watchMs / 60000)} мин`);
     }
   });
 }
@@ -261,6 +389,10 @@ module.exports = {
   disconnectAll,
   reconnectAll,
   connectOne,
+  sendMessage,
+  sendMessageAll,
+  followChannel,
+  followAll,
   startQueueJoin,
   startQueueLeave,
   stopQueues,

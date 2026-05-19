@@ -14,7 +14,6 @@ router.get("/status", (req, res) => {
 // Аккаунты
 router.get("/accounts", (req, res) => {
   const accounts = db.getAccounts();
-  // Добавляем инфо о таймерах
   const now = Date.now();
   const enriched = accounts.map(a => ({
     ...a,
@@ -69,20 +68,20 @@ router.post("/accounts/disconnect", (req, res) => {
   res.json({ ok: true });
 });
 
-// Таймеры аккаунта
+// Таймеры
 router.post("/accounts/set-times", (req, res) => {
   const { id, watch_time, afk_time } = req.body;
   db.setAccountTimes(id, watch_time, afk_time);
   res.json({ ok: true });
 });
 
-// Цикл для одного аккаунта
+// Цикл одного
 router.post("/accounts/start-cycle", (req, res) => {
   const { id } = req.body;
   db.setCycleActive(id, true);
   db.setPhase(id, "joining", Date.now());
   twitch.startCycleProcessor();
-  db.addLog("cycle", `Цикл запущен для аккаунта #${id}`);
+  db.addLog("cycle", `Цикл запущен для #${id}`);
   res.json({ ok: true });
 });
 
@@ -91,6 +90,37 @@ router.post("/accounts/stop-cycle", (req, res) => {
   db.setCycleActive(id, false);
   db.setPhase(id, "idle", 0);
   res.json({ ok: true });
+});
+
+// === ЧАТ ===
+router.post("/chat/send", (req, res) => {
+  const { id, message } = req.body;
+  if (!message) return res.json({ ok: false, error: "Нет сообщения" });
+
+  twitch.sendMessage(id, message).then(result => {
+    res.json(result);
+  });
+});
+
+router.post("/chat/send-all", (req, res) => {
+  const { message } = req.body;
+  if (!message) return res.json({ ok: false, error: "Нет сообщения" });
+
+  const result = twitch.sendMessageAll(message);
+  res.json(result);
+});
+
+// === ФОЛЛОВИНГ ===
+router.post("/accounts/follow", (req, res) => {
+  const { id } = req.body;
+  const account = db.getAccountById(id);
+  if (!account) return res.json({ ok: false, error: "Аккаунт не найден" });
+  twitch.followChannel(account).then(result => res.json(result));
+});
+
+router.post("/action/follow-all", (req, res) => {
+  const result = twitch.followAll();
+  res.json(result);
 });
 
 // Очередь
@@ -120,7 +150,7 @@ router.post("/cycle/stop", (req, res) => {
   res.json({ ok: true });
 });
 
-// Массовые действия
+// Массовые
 router.post("/action/connect-all", (req, res) => {
   twitch.connectAll();
   res.json({ ok: true });
@@ -138,7 +168,7 @@ router.post("/action/reconnect-all", (req, res) => {
 
 // Настройки
 router.post("/settings", (req, res) => {
-  const fields = ["channel", "auto_rejoin", "rejoin_interval", "queue_join_interval", "queue_leave_interval", "global_cycle", "global_watch_time", "global_afk_time"];
+  const fields = ["channel", "queue_join_interval", "queue_leave_interval", "global_watch_time", "global_afk_time", "client_id"];
   fields.forEach(key => {
     if (req.body[key] !== undefined) {
       db.setSetting(key, key === "channel" ? req.body[key].toLowerCase().trim() : req.body[key]);
