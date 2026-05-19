@@ -32,6 +32,12 @@ function checkProxy(proxy) {
       const url = `http://${auth}${host}:${port}`;
       const agent = new HttpsProxyAgent(url);
 
+      const body = JSON.stringify({
+        operationName: "PlaybackAccessToken_Template",
+        query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature }}',
+        variables: { isLive: true, login: "xqc", isVod: false, vodID: "", playerType: "site" }
+      });
+
       const req = https.request({
         hostname: "gql.twitch.tv",
         path: "/gql",
@@ -41,18 +47,25 @@ function checkProxy(proxy) {
         headers: {
           "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
           "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
         }
       }, (res) => {
         let data = "";
         res.on("data", chunk => data += chunk);
         res.on("end", () => {
-          resolve(res.statusCode < 500);
+          try {
+            const json = JSON.parse(data);
+            // Рабочий только если Twitch вернул валидный JSON с data
+            resolve(json && json.data !== undefined);
+          } catch (e) {
+            resolve(false);
+          }
         });
       });
 
       req.on("error", () => resolve(false));
       req.on("timeout", () => { req.destroy(); resolve(false); });
-      req.write(JSON.stringify({ query: "{}" }));
+      req.write(body);
       req.end();
     } catch (e) {
       resolve(false);
