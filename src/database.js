@@ -13,7 +13,7 @@ if (fs.existsSync(dbPath)) {
     const testDb = new Database(dbPath);
     const cols = testDb.prepare("PRAGMA table_info(accounts)").all().map(c => c.name);
     testDb.close();
-    if (!cols.includes("phase") || !cols.includes("next_action")) {
+    if (!cols.includes("phase") || !cols.includes("next_action") || !cols.includes("proxy")) {
       fs.unlinkSync(dbPath);
       console.log("[DB] Старая база удалена, создаём новую");
     }
@@ -30,6 +30,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     login TEXT NOT NULL,
     token TEXT NOT NULL,
+    proxy TEXT DEFAULT '',
     enabled INTEGER DEFAULT 1,
     status TEXT DEFAULT 'offline',
     phase TEXT DEFAULT 'idle',
@@ -64,6 +65,14 @@ module.exports = {
   getAccountById: (id) => db.prepare("SELECT * FROM accounts WHERE id = ?").get(id),
   addAccount: (login, token) => db.prepare("INSERT INTO accounts (login, token) VALUES (?, ?)").run(login, token),
   deleteAccount: (id) => db.prepare("DELETE FROM accounts WHERE id = ?").run(id),
+  setProxy: (id, proxy) => db.prepare("UPDATE accounts SET proxy = ? WHERE id = ?").run(proxy, id),
+  setProxyBulk: (proxies) => {
+    const accounts = db.prepare("SELECT id FROM accounts ORDER BY id").all();
+    const update = db.prepare("UPDATE accounts SET proxy = ? WHERE id = ?");
+    accounts.forEach((acc, i) => {
+      if (proxies[i]) update.run(proxies[i], acc.id);
+    });
+  },
   setStatus: (id, status) => db.prepare("UPDATE accounts SET status = ? WHERE id = ?").run(status, id),
   setPhase: (id, phase, nextAction) => db.prepare("UPDATE accounts SET phase = ?, next_action = ? WHERE id = ?").run(phase, nextAction, id),
   resetAll: () => db.prepare("UPDATE accounts SET status = 'offline', phase = 'idle', next_action = 0").run(),

@@ -1,37 +1,96 @@
 const tmi = require("tmi.js");
 const https = require("https");
+const { SocksProxyAgent } = require("socks-proxy-agent");
+const { HttpsProxyAgent } = require("https-proxy-agent");
 const db = require("./database");
 
-const clients = new Map(); // id -> tmi.Client
-const watchers = new Map(); // id -> { timer, token }
+const clients = new Map();
+const watchers = new Map();
 let loopTimer = null;
 
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// === HTTPS запрос ===
-function httpsRequest(options, postData) {
+// === ПРОКСИ ===
+// Форматы: ip:port:login:pass или login:pass@ip:port или ip:port
+function parseProxy(proxyStr) {
+  if (!proxyStr || !proxyStr.trim()) return null;
+  const p = proxyStr.trim();
+
+  // Формат: login:pass@ip:port
+  if (p.includes("@")) {
+    const [auth, host] = p.split("@");
+    const [user, pass] = auth.split(":");
+    const [ip, port] = host.split(":");
+    return { host: ip, port: parseInt(port), user, pass };
+  }
+
+  // Формат: ip:port:login:pass
+  const parts = p.split(":");
+  if (parts.length === 4) {
+    return { host: parts[0], port: parseInt(parts[1]), user: parts[2], pass: parts[3] };
+  }
+  if (parts.length === 2) {
+    return { host: parts[0], port: parseInt(parts[1]), user: null, pass: null };
+  }
+  return null;
+}
+
+function createAgent(proxyStr) {
+  const proxy = parseProxy(proxyStr);
+  if (!proxy) return null;
+
+  // Пробуем как HTTP прокси (большинство прокси такие)
+  const auth = proxy.user ? `${proxy.user}:${proxy.pass}@` : "";
+  const url = `http://${auth}${proxy.host}:${proxy.port}`;
+  return new HttpsProxyAgent(url);
+}
+
+function createSocksAgent(proxyStr) {
+  const proxy = parseProxy(proxyStr);
+  if (!proxy) return null;
+
+  const auth = proxy.user ? `${proxy.user}:${proxy.pass}@` : "";
+  const url = `socks5://${auth}${proxy.host}:${proxy.port}`;
+  return new SocksProxyAgent(url);
+}
+
+// === HTTPS с прокси ===
+function httpsRequestProxy(options, postData, agent) {
   return new Promise((resolve, reject) => {
+    if (agent) options.agent = agent;
     const req = https.request(options, (res) => {
       let data = "";
       res.on("data", chunk => data += chunk);
       res.on("end", () => resolve({ status: res.statusCode, data }));
     });
     req.on("error", reject);
-    req.setTimeout(10000, () => { req.destroy(); reject(new Error("timeout")); });
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
     if (postData) req.write(postData);
     req.end();
   });
 }
 
-function httpsGet(url) {
+function httpsGetProxy(url, agent) {
   return new Promise((resolve, reject) => {
-    https.get(url, { timeout: 10000 }, (res) => {
+    const opts = new URL(url);
+    const reqOpts = {
+      hostname: opts.hostname,
+      path: opts.pathname + opts.search,
+      method: "GET",
+      timeout: 15000,
+    };
+    if (agent) reqOpts.agent = agent;
+
+    const req = https.request(reqOpts, (res) => {
       let data = "";
       res.on("data", chunk => data += chunk);
       res.on("end", () => resolve({ status: res.statusCode, data }));
-    }).on("error", reject);
+    });
+    req.on("error", reject);
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
+    req.end();
   });
 }
 
@@ -44,6 +103,7 @@ function connect(account) {
 
   const token = account.token.startsWith("oauth:") ? account.token : "oauth:" + account.token;
 
+  // tmi.js не поддерживает прокси напрямую, подключаем без прокси (IRC не влияет на viewer count)
   const client = new tmi.Client({
     options: { debug: false },
     connection: { reconnect: true, secure: true },
@@ -55,7 +115,6 @@ function connect(account) {
     db.setStatus(account.id, "online");
     console.log(`[+] ${account.login} зашёл`);
     db.addLog("join", account.login + " зашёл");
-    // Запускаем HLS просмотр
     startHLS(account);
   }).catch(err => {
     db.setStatus(account.id, "error");
@@ -83,24 +142,16 @@ function disconnectAll() {
   db.resetAll();
 }
 
-// === HLS ПРОСМОТР (это то что увеличивает viewer count) ===
-
-// Шаг 1: Получить access token через GQL
-function getAccessToken(channel, oauthToken) {
+// === HLS С ПРОКСИ ===
+function getAccessToken(channel, oauthToken, agent) {
   const cleanToken = oauthToken.replace("oauth:", "");
   const body = JSON.stringify({
     operationName: "PlaybackAccessToken_Template",
     query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) {  streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) {    value    signature    __typename  }  videoPlaybackAccessToken(id: $vodID, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) {    value    signature    __typename  }}',
-    variables: {
-      isLive: true,
-      login: channel,
-      isVod: false,
-      vodID: "",
-      playerType: "site"
-    }
+    variables: { isLive: true, login: channel, isVod: false, vodID: "", playerType: "site" }
   });
 
-  return httpsRequest({
+  return httpsRequestProxy({
     hostname: "gql.twitch.tv",
     path: "/gql",
     method: "POST",
@@ -110,17 +161,16 @@ function getAccessToken(channel, oauthToken) {
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(body),
     }
-  }, body).then(res => {
+  }, body, agent).then(res => {
     const json = JSON.parse(res.data);
     if (json.data && json.data.streamPlaybackAccessToken) {
       return json.data.streamPlaybackAccessToken;
     }
-    throw new Error("No access token: " + res.data.substring(0, 100));
+    throw new Error("No token: " + res.data.substring(0, 80));
   });
 }
 
-// Шаг 2: Получить master playlist (список качеств)
-function getMasterPlaylist(channel, tokenData) {
+function getMasterPlaylist(channel, tokenData, agent) {
   const params = new URLSearchParams({
     allow_source: "true",
     allow_audio_only: "true",
@@ -132,20 +182,17 @@ function getMasterPlaylist(channel, tokenData) {
     sig: tokenData.signature,
     token: tokenData.value,
     type: "any",
-    referrer: "https://www.twitch.tv",
   });
 
   const url = `https://usher.ttvnw.net/api/channel/hls/${channel}.m3u8?${params.toString()}`;
-  return httpsGet(url).then(res => {
-    if (res.status !== 200) throw new Error("Master playlist: " + res.status);
-    // Парсим — берём audio_only или самое низкое качество
+  return httpsGetProxy(url, agent).then(res => {
+    if (res.status !== 200) throw new Error("Playlist: " + res.status);
     const lines = res.data.split("\n");
     let audioOnly = null;
     let lowest = null;
 
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes("audio_only") && i + 1 < lines.length) {
-        // Следующая строка после audio_only — URL
+      if (lines[i].includes("audio_only")) {
         for (let j = i + 1; j < lines.length; j++) {
           if (lines[j].startsWith("http")) { audioOnly = lines[j].trim(); break; }
         }
@@ -154,39 +201,37 @@ function getMasterPlaylist(channel, tokenData) {
         lowest = lines[i].trim();
       }
     }
-
-    // Предпочитаем audio_only (минимум трафика)
     return audioOnly || lowest;
   });
 }
 
-// Шаг 3: Запрашивать media playlist и скачивать сегменты
 function startHLS(account) {
   const channel = db.getSetting("channel");
   if (!channel) return;
-
-  // Не запускаем если уже смотрит
   if (watchers.has(account.id)) return;
 
   const token = account.token.startsWith("oauth:") ? account.token : "oauth:" + account.token;
 
-  getAccessToken(channel, token).then(tokenData => {
-    return getMasterPlaylist(channel, tokenData);
+  // Создаём прокси-агент для этого аккаунта
+  const agent = account.proxy ? createAgent(account.proxy) : null;
+  const proxyLabel = account.proxy ? ` [proxy: ${account.proxy.split(":")[0]}]` : " [no proxy]";
+
+  getAccessToken(channel, token, agent).then(tokenData => {
+    return getMasterPlaylist(channel, tokenData, agent);
   }).then(mediaPlaylistUrl => {
     if (!mediaPlaylistUrl) {
-      console.log(`[HLS] ${account.login}: нет playlist URL (стрим оффлайн?)`);
+      console.log(`[HLS] ${account.login}: нет playlist${proxyLabel}`);
       return;
     }
 
-    console.log(`[HLS] ${account.login} смотрит поток`);
-    db.addLog("hls", account.login + " смотрит поток");
+    console.log(`[HLS] ${account.login} смотрит поток${proxyLabel}`);
+    db.addLog("hls", account.login + " смотрит" + proxyLabel);
 
     let errorCount = 0;
     let lastSegment = "";
 
-    // Каждые 5 сек запрашиваем playlist и скачиваем новый сегмент
     const timer = setInterval(() => {
-      httpsGet(mediaPlaylistUrl).then(res => {
+      httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
         if (res.status !== 200) {
           errorCount++;
           if (errorCount >= 3) {
@@ -197,76 +242,100 @@ function startHLS(account) {
         }
         errorCount = 0;
 
-        // Парсим playlist — находим последний .ts сегмент
         const lines = res.data.split("\n");
         let newestSegment = null;
         for (let i = lines.length - 1; i >= 0; i--) {
           const line = lines[i].trim();
-          if (line && !line.startsWith("#")) {
-            newestSegment = line;
-            break;
-          }
+          if (line && !line.startsWith("#")) { newestSegment = line; break; }
         }
 
-        // Скачиваем сегмент если он новый
         if (newestSegment && newestSegment !== lastSegment) {
           lastSegment = newestSegment;
-          // Скачиваем сегмент (первые несколько KB достаточно)
-          downloadSegment(newestSegment);
+          downloadSegment(newestSegment, agent);
         }
       }).catch(() => {
         errorCount++;
-        if (errorCount >= 5) {
-          stopHLS(account.id);
-        }
+        if (errorCount >= 5) stopHLS(account.id);
       });
     }, 5000);
 
     watchers.set(account.id, { timer });
-
   }).catch(err => {
-    console.log(`[HLS] ${account.login}: ${err.message}`);
+    console.log(`[HLS] ${account.login}: ${err.message}${proxyLabel}`);
+    // Если прокси не работает, попробуем SOCKS5
+    if (account.proxy && !watchers.has(account.id)) {
+      const socksAgent = createSocksAgent(account.proxy);
+      if (socksAgent) {
+        console.log(`[HLS] ${account.login}: пробуем SOCKS5...`);
+        startHLSWithAgent(account, socksAgent);
+      }
+    }
   });
 }
 
-// Скачиваем сегмент (читаем хотя бы часть данных чтобы Twitch засчитал)
-function downloadSegment(url) {
+function startHLSWithAgent(account, agent) {
+  const channel = db.getSetting("channel");
+  const token = account.token.startsWith("oauth:") ? account.token : "oauth:" + account.token;
+
+  getAccessToken(channel, token, agent).then(tokenData => {
+    return getMasterPlaylist(channel, tokenData, agent);
+  }).then(mediaPlaylistUrl => {
+    if (!mediaPlaylistUrl) return;
+
+    console.log(`[HLS] ${account.login} смотрит (SOCKS5)`);
+    db.addLog("hls", account.login + " смотрит (SOCKS5)");
+
+    let errorCount = 0;
+    let lastSegment = "";
+
+    const timer = setInterval(() => {
+      httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
+        if (res.status !== 200) { errorCount++; if (errorCount >= 3) stopHLS(account.id); return; }
+        errorCount = 0;
+        const lines = res.data.split("\n");
+        let seg = null;
+        for (let i = lines.length - 1; i >= 0; i--) { const l = lines[i].trim(); if (l && !l.startsWith("#")) { seg = l; break; } }
+        if (seg && seg !== lastSegment) { lastSegment = seg; downloadSegment(seg, agent); }
+      }).catch(() => { errorCount++; if (errorCount >= 5) stopHLS(account.id); });
+    }, 5000);
+
+    watchers.set(account.id, { timer });
+  }).catch(err => {
+    console.log(`[HLS] ${account.login} SOCKS5 fail: ${err.message}`);
+  });
+}
+
+function downloadSegment(url, agent) {
   try {
-    const req = https.get(url, { timeout: 8000 }, (res) => {
+    const opts = new URL(url);
+    const reqOpts = { hostname: opts.hostname, path: opts.pathname + opts.search, method: "GET", timeout: 8000 };
+    if (agent) reqOpts.agent = agent;
+
+    const req = https.request(reqOpts, (res) => {
       let bytes = 0;
-      res.on("data", (chunk) => {
-        bytes += chunk.length;
-        // Читаем минимум 16KB чтобы выглядело как реальный просмотр
-        if (bytes > 16000) {
-          res.destroy(); // Закрываем — не нужно скачивать весь сегмент
-        }
-      });
+      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 16000) res.destroy(); });
       res.on("end", () => {});
       res.on("error", () => {});
     });
     req.on("error", () => {});
+    req.end();
   } catch (e) {}
 }
 
 function stopHLS(id) {
   const w = watchers.get(id);
-  if (w) {
-    clearInterval(w.timer);
-    watchers.delete(id);
-  }
+  if (w) { clearInterval(w.timer); watchers.delete(id); }
 }
 
-// === ГЛАВНЫЙ ЦИКЛ ===
+// === ЦИКЛ ===
 function start() {
   try {
     const accounts = db.getEnabledAccounts();
     if (accounts.length === 0) { console.log("[START] Нет аккаунтов"); return; }
-
     const channel = db.getSetting("channel");
     if (!channel) { console.log("[START] Канал не задан"); return; }
 
     disconnectAll();
-
     db.setSetting("running", "1");
     db.addLog("system", "СТАРТ — " + channel);
 
@@ -274,8 +343,7 @@ function start() {
     const now = Date.now();
 
     accounts.forEach((acc, i) => {
-      const joinAt = now + i * interval;
-      db.setPhase(acc.id, "waiting_join", joinAt);
+      db.setPhase(acc.id, "waiting_join", now + i * interval);
       db.setStatus(acc.id, "ожидание");
     });
 
@@ -295,51 +363,41 @@ function stop() {
   console.log("[STOP]");
 }
 
-function startLoop() {
-  if (loopTimer) return;
-  loopTimer = setInterval(tick, 15000);
-  tick();
-}
-
-function stopLoop() {
-  if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
-}
+function startLoop() { if (loopTimer) return; loopTimer = setInterval(tick, 15000); tick(); }
+function stopLoop() { if (loopTimer) { clearInterval(loopTimer); loopTimer = null; } }
 
 function tick() {
   if (db.getSetting("running") !== "1") return;
-
   const now = Date.now();
   const accounts = db.getEnabledAccounts();
 
   accounts.forEach(acc => {
-    if (acc.next_action === 0) return;
-    if (now < acc.next_action) return;
+    if (acc.next_action === 0 || now < acc.next_action) return;
 
     if (acc.phase === "waiting_join") {
       connect(acc);
-      const watchTime = rand(10, 30) * 60 * 1000;
-      db.setPhase(acc.id, "watching", now + watchTime);
-      console.log(`[>] ${acc.login} смотрит ${Math.round(watchTime / 60000)} мин`);
-    }
-    else if (acc.phase === "watching") {
+      db.setPhase(acc.id, "watching", now + rand(10, 30) * 60 * 1000);
+    } else if (acc.phase === "watching") {
       disconnect(acc.id);
-      const afkTime = rand(5, 15) * 60 * 1000;
-      db.setPhase(acc.id, "afk", now + afkTime);
+      db.setPhase(acc.id, "afk", now + rand(5, 15) * 60 * 1000);
       db.setStatus(acc.id, "афк");
-      console.log(`[<] ${acc.login} АФК ${Math.round(afkTime / 60000)} мин`);
       db.addLog("afk", acc.login + " АФК");
-    }
-    else if (acc.phase === "afk") {
+    } else if (acc.phase === "afk") {
       connect(acc);
-      const watchTime = rand(10, 30) * 60 * 1000;
-      db.setPhase(acc.id, "watching", now + watchTime);
-      console.log(`[>] ${acc.login} вернулся ${Math.round(watchTime / 60000)} мин`);
+      db.setPhase(acc.id, "watching", now + rand(10, 30) * 60 * 1000);
       db.addLog("join", acc.login + " вернулся");
     }
   });
 }
 
-// Чат
+function connectNow(id) {
+  const account = db.getAccountById(id);
+  if (!account) return;
+  connect(account);
+  db.setPhase(id, "watching", Date.now() + rand(10, 30) * 60 * 1000);
+  db.addLog("join", account.login + " запущен вручную");
+}
+
 function sendMessage(id, message) {
   const client = clients.get(id);
   if (!client) return Promise.resolve({ ok: false, error: "Не подключен" });
@@ -350,21 +408,6 @@ function sendMessage(id, message) {
   }).catch(err => ({ ok: false, error: err.message }));
 }
 
-// Авто-возобновление
-if (db.getSetting("running") === "1") {
-  console.log("[RESUME] Продолжаем");
-  startLoop();
-}
-
-// Подключить одного сразу (без ожидания) и дать рандомный таймер просмотра
-function connectNow(id) {
-  const account = db.getAccountById(id);
-  if (!account) return;
-  connect(account);
-  const watchTime = rand(10, 30) * 60 * 1000;
-  db.setPhase(id, "watching", Date.now() + watchTime);
-  console.log(`[>] ${account.login} запущен вручную, смотрит ${Math.round(watchTime / 60000)} мин`);
-  db.addLog("join", account.login + " запущен вручную");
-}
+if (db.getSetting("running") === "1") { console.log("[RESUME]"); startLoop(); }
 
 module.exports = { start, stop, disconnect, disconnectAll, sendMessage, connectNow, clients };

@@ -31,6 +31,7 @@ router.get("/accounts", (req, res) => {
   const list = accounts.map(a => ({
     id: a.id,
     login: a.login,
+    proxy: a.proxy || "",
     status: a.status || "offline",
     phase: a.phase || "idle",
     time_left: a.next_action > now ? Math.round((a.next_action - now) / 1000) : 0,
@@ -63,12 +64,24 @@ router.post("/accounts/delete", (req, res) => {
 // Запустить одного сразу
 router.post("/accounts/connect-now", (req, res) => {
   const { id } = req.body;
-  try {
-    bot.connectNow(id);
-    res.json({ ok: true });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
+  try { bot.connectNow(id); res.json({ ok: true }); }
+  catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+// Прокси
+router.post("/proxy/set", (req, res) => {
+  const { id, proxy } = req.body;
+  db.setProxy(id, proxy || "");
+  res.json({ ok: true });
+});
+
+router.post("/proxy/bulk", (req, res) => {
+  const { proxies } = req.body;
+  if (!proxies) return res.json({ ok: false });
+  const list = proxies.replace(/\|/g, "\n").split("\n").map(p => p.trim()).filter(p => p);
+  db.setProxyBulk(list);
+  db.addLog("system", `Прокси назначены: ${list.length}`);
+  res.json({ ok: true, count: list.length });
 });
 
 // Старт/Стоп

@@ -83,7 +83,7 @@
   <div class="sec">
     <h2>👥 Аккаунты</h2>
     <div class="table-wrap" style="overflow-x:auto">
-      <table><thead><tr><th>#</th><th>Логин</th><th>Статус</th><th>Фаза</th><th>Таймер</th><th></th></tr></thead>
+      <table><thead><tr><th>#</th><th>Логин</th><th>Статус</th><th>Фаза</th><th>Таймер</th><th>Прокси</th><th></th></tr></thead>
       <tbody id="tbl"></tbody></table>
     </div>
   </div>
@@ -93,6 +93,14 @@
     <h2>➕ Добавить аккаунты</h2>
     <textarea id="new-acc" placeholder="login:pass:token:id:date (каждый с новой строки или через |)"></textarea>
     <div class="btn-group"><button class="btn btn-go" onclick="addAcc()">Добавить</button></div>
+  </div>
+
+  <!-- Прокси -->
+  <div class="sec">
+    <h2>🌐 Прокси</h2>
+    <p style="color:#888;margin-bottom:8px;font-size:12px;">Формат: ip:port:login:pass (каждый с новой строки). Назначаются по порядку аккаунтов.</p>
+    <textarea id="proxy-list" placeholder="1.2.3.4:8080:user:pass&#10;5.6.7.8:1080:user:pass"></textarea>
+    <div class="btn-group"><button class="btn btn-pri" onclick="setProxies()">Назначить прокси</button></div>
   </div>
 
   <!-- Чат -->
@@ -145,7 +153,8 @@ async function load() {
   document.getElementById("tbl").innerHTML = accs.map((a,i) => {
     const sc = a.status==="online"?"st-on":a.status==="афк"?"st-afk":a.status==="ожидание"?"st-wait":a.status==="error"?"st-err":"st-off";
     const ph = a.phase==="watching"?"👀 Смотрит":a.phase==="afk"?"💤 АФК":a.phase==="waiting_join"?"⏳ Ожидает":"—";
-    return `<tr><td>${i+1}</td><td><b>${a.login}</b></td><td><span class="st ${sc}">${a.status}</span></td><td>${ph}</td><td class="timer">${fmt(a.time_left)}</td><td><button class="btn btn-sm btn-go" onclick="connectNow(${a.id})" title="Запустить сейчас">▶</button> <button class="btn btn-sm btn-stop" onclick="delAcc(${a.id})">🗑</button></td></tr>`;
+    const proxyShort = a.proxy ? "✅" : "❌";
+    return `<tr><td>${i+1}</td><td><b>${a.login}</b></td><td><span class="st ${sc}">${a.status}</span></td><td>${ph}</td><td class="timer">${fmt(a.time_left)}</td><td>${proxyShort}</td><td><button class="btn btn-sm btn-go" onclick="connectNow(${a.id})" title="Запустить сейчас">▶</button> <button class="btn btn-sm btn-stop" onclick="delAcc(${a.id})">🗑</button></td></tr>`;
   }).join("");
 
   // Чат select
@@ -168,6 +177,7 @@ async function saveSettings() { await api("/api/settings", { channel: document.g
 async function addAcc() { const t = document.getElementById("new-acc").value; if (!t.trim()) return; const r = await api("/api/accounts/add", { accounts: t }); toast("Добавлено: " + r.added); document.getElementById("new-acc").value = ""; load(); }
 async function delAcc(id) { if (!confirm("Удалить?")) return; await api("/api/accounts/delete", { id }); load(); }
 async function connectNow(id) { await api("/api/accounts/connect-now", { id }); toast("Запущен!"); setTimeout(load, 2000); }
+async function setProxies() { const t = document.getElementById("proxy-list").value; if (!t.trim()) return; const r = await api("/api/proxy/bulk", { proxies: t }); toast("Прокси назначены: " + r.count); load(); }
 async function sendChat() { const id = +document.getElementById("chat-acc").value; const m = document.getElementById("chat-msg").value; if (!m) return; const r = await api("/api/chat/send", { id, message: m }); toast(r.ok ? "Отправлено" : r.error); document.getElementById("chat-msg").value = ""; }
 async function sendChatAll() { const m = document.getElementById("chat-all-msg").value; if (!m) return; const r = await api("/api/chat/send-all", { message: m }); toast("Отправляется: " + r.count); document.getElementById("chat-all-msg").value = ""; }
 

@@ -1,7 +1,7 @@
 {
   "name": "twitch-viewer-bot",
-  "version": "4.0.0",
-  "description": "Twitch viewer bot with admin panel",
+  "version": "5.0.0",
+  "description": "Twitch viewer bot with proxy support",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,6 +9,8 @@
   "dependencies": {
     "tmi.js": "1.8.5",
     "better-sqlite3": "9.4.3",
-    "express": "4.18.2"
+    "express": "4.18.2",
+    "socks-proxy-agent": "8.0.2",
+    "https-proxy-agent": "7.0.4"
   }
 }
