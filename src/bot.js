@@ -160,7 +160,7 @@ function getMasterPlaylist(channel, tokenData) {
   });
 }
 
-// Шаг 3: Запрашивать media playlist каждые 10 сек
+// Шаг 3: Запрашивать media playlist и скачивать сегменты
 function startHLS(account) {
   const channel = db.getSetting("channel");
   if (!channel) return;
@@ -182,20 +182,37 @@ function startHLS(account) {
     db.addLog("hls", account.login + " смотрит поток");
 
     let errorCount = 0;
+    let lastSegment = "";
 
-    // Каждые 10 сек запрашиваем media playlist
+    // Каждые 5 сек запрашиваем playlist и скачиваем новый сегмент
     const timer = setInterval(() => {
       httpsGet(mediaPlaylistUrl).then(res => {
         if (res.status !== 200) {
           errorCount++;
           if (errorCount >= 3) {
-            // Плейлист протух — переподключаемся
-            console.log(`[HLS] ${account.login}: переподключение`);
             stopHLS(account.id);
             setTimeout(() => startHLS(account), 10000 + rand(0, 5000));
           }
-        } else {
-          errorCount = 0; // сброс при успехе
+          return;
+        }
+        errorCount = 0;
+
+        // Парсим playlist — находим последний .ts сегмент
+        const lines = res.data.split("\n");
+        let newestSegment = null;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i].trim();
+          if (line && !line.startsWith("#")) {
+            newestSegment = line;
+            break;
+          }
+        }
+
+        // Скачиваем сегмент если он новый
+        if (newestSegment && newestSegment !== lastSegment) {
+          lastSegment = newestSegment;
+          // Скачиваем сегмент (первые несколько KB достаточно)
+          downloadSegment(newestSegment);
         }
       }).catch(() => {
         errorCount++;
@@ -203,13 +220,32 @@ function startHLS(account) {
           stopHLS(account.id);
         }
       });
-    }, 10000);
+    }, 5000);
 
     watchers.set(account.id, { timer });
 
   }).catch(err => {
     console.log(`[HLS] ${account.login}: ${err.message}`);
   });
+}
+
+// Скачиваем сегмент (читаем хотя бы часть данных чтобы Twitch засчитал)
+function downloadSegment(url) {
+  try {
+    const req = https.get(url, { timeout: 8000 }, (res) => {
+      let bytes = 0;
+      res.on("data", (chunk) => {
+        bytes += chunk.length;
+        // Читаем минимум 16KB чтобы выглядело как реальный просмотр
+        if (bytes > 16000) {
+          res.destroy(); // Закрываем — не нужно скачивать весь сегмент
+        }
+      });
+      res.on("end", () => {});
+      res.on("error", () => {});
+    });
+    req.on("error", () => {});
+  } catch (e) {}
 }
 
 function stopHLS(id) {
