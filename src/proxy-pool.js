@@ -109,9 +109,18 @@ function loadProxies(text) {
 }
 
 // ---------- ПРОВЕРКА ОДНОГО ----------
-// Стратегия: HEAD https://gql.twitch.tv/ через прокси.
-// Любой валидный HTTP-ответ от Twitch значит "доходит".
-// Жёсткий внешний таймаут гарантированно обрывает зависший запрос.
+// Стратегия: реальный POST к gql.twitch.tv/gql с тем же запросом, что делает плеер.
+// Прокси считается рабочим только если:
+//   - HTTP 200
+//   - Content-Type содержит "json"
+//   - Тело парсится как JSON и в нём есть поле data или errors (т.е. это реально Twitch GraphQL)
+// Это отсекает captive-портали, провайдерские заглушки и HTML-страницы прокси.
+const PROBE_BODY = JSON.stringify({
+  operationName: "PlaybackAccessToken_Template",
+  query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature }}',
+  variables: { isLive: true, login: "xqc", isVod: false, vodID: "", playerType: "site" },
+});
+
 function checkOnce(proxy, timeoutMs) {
   return new Promise((resolve) => {
     let done = false;
@@ -143,19 +152,44 @@ function checkOnce(proxy, timeoutMs) {
 
       req = https.request({
         hostname: "gql.twitch.tv",
-        path: "/",
-        method: "HEAD",
+        path: "/gql",
+        method: "POST",
         agent,
         timeout: timeoutMs,
-        headers: { "User-Agent": "Mozilla/5.0", "Connection": "close" },
+        headers: {
+          "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(PROBE_BODY),
+          "User-Agent": "Mozilla/5.0",
+          "Connection": "close",
+        },
       }, (res) => {
-        // Любой ответ — прокси успешно дошёл до Twitch
-        res.resume();
-        finish(true);
+        if (res.statusCode !== 200) { res.resume(); return finish(false); }
+        const ct = String(res.headers["content-type"] || "").toLowerCase();
+        if (!ct.includes("json")) { res.resume(); return finish(false); }
+
+        let data = "";
+        let bytes = 0;
+        res.on("data", (chunk) => {
+          bytes += chunk.length;
+          if (bytes > 32768) { res.destroy(); return finish(false); }
+          data += chunk;
+        });
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            // Twitch GraphQL всегда возвращает либо data, либо errors
+            finish(!!(json && (json.data !== undefined || json.errors)));
+          } catch (e) {
+            finish(false);
+          }
+        });
+        res.on("error", () => finish(false));
       });
 
       req.on("error", () => finish(false));
       req.on("timeout", () => finish(false));
+      req.write(PROBE_BODY);
       req.end();
     } catch (e) {
       finish(false);

@@ -226,7 +226,12 @@ function startHLS(account) {
 
   // Создаём прокси-агент для этого аккаунта
   const agent = account.proxy ? createAgent(account.proxy) : null;
-  const proxyLabel = account.proxy ? ` [proxy: ${account.proxy.split(":")[0]}]` : " [no proxy]";
+  // Короткий человекочитаемый лейбл: type host:port
+  let proxyLabel = " [no proxy]";
+  if (account.proxy) {
+    const pp = parseProxy(account.proxy);
+    proxyLabel = pp ? ` [${pp.type} ${pp.host}:${pp.port}]` : ` [${account.proxy}]`;
+  }
 
   getAccessToken(channel, token, agent).then(tokenData => {
     return getMasterPlaylist(channel, tokenData, agent);
@@ -280,7 +285,9 @@ function startHLS(account) {
       const newProxy = proxyPool.getProxy(account.id);
       if (newProxy && newProxy !== account.proxy) {
         db.setProxy(account.id, newProxy);
-        console.log(`[HLS] ${account.login}: сменили прокси на ${newProxy.split(":")[0]}`);
+        const np = parseProxy(newProxy);
+        const npLabel = np ? `${np.type} ${np.host}:${np.port}` : newProxy;
+        console.log(`[HLS] ${account.login}: сменили прокси на ${npLabel}`);
         // Пробуем с новым прокси
         const updatedAccount = db.getAccountById(account.id);
         setTimeout(() => startHLS(updatedAccount), 3000);
