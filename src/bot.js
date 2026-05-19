@@ -320,4 +320,15 @@ if (db.getSetting("running") === "1") {
   startLoop();
 }
 
-module.exports = { start, stop, disconnect, disconnectAll, sendMessage, clients };
+// Подключить одного сразу (без ожидания) и дать рандомный таймер просмотра
+function connectNow(id) {
+  const account = db.getAccountById(id);
+  if (!account) return;
+  connect(account);
+  const watchTime = rand(10, 30) * 60 * 1000;
+  db.setPhase(id, "watching", Date.now() + watchTime);
+  console.log(`[>] ${account.login} запущен вручную, смотрит ${Math.round(watchTime / 60000)} мин`);
+  db.addLog("join", account.login + " запущен вручную");
+}
+
+module.exports = { start, stop, disconnect, disconnectAll, sendMessage, connectNow, clients };

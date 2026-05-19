@@ -145,7 +145,7 @@ async function load() {
   document.getElementById("tbl").innerHTML = accs.map((a,i) => {
     const sc = a.status==="online"?"st-on":a.status==="афк"?"st-afk":a.status==="ожидание"?"st-wait":a.status==="error"?"st-err":"st-off";
     const ph = a.phase==="watching"?"👀 Смотрит":a.phase==="afk"?"💤 АФК":a.phase==="waiting_join"?"⏳ Ожидает":"—";
-    return `<tr><td>${i+1}</td><td><b>${a.login}</b></td><td><span class="st ${sc}">${a.status}</span></td><td>${ph}</td><td class="timer">${fmt(a.time_left)}</td><td><button class="btn btn-sm btn-stop" onclick="delAcc(${a.id})">🗑</button></td></tr>`;
+    return `<tr><td>${i+1}</td><td><b>${a.login}</b></td><td><span class="st ${sc}">${a.status}</span></td><td>${ph}</td><td class="timer">${fmt(a.time_left)}</td><td><button class="btn btn-sm btn-go" onclick="connectNow(${a.id})" title="Запустить сейчас">▶</button> <button class="btn btn-sm btn-stop" onclick="delAcc(${a.id})">🗑</button></td></tr>`;
   }).join("");
 
   // Чат select
@@ -167,6 +167,7 @@ async function doStop() { await api("/api/stop", {}); toast("Остановле�
 async function saveSettings() { await api("/api/settings", { channel: document.getElementById("channel").value, join_interval: document.getElementById("interval").value }); toast("Сохранено"); }
 async function addAcc() { const t = document.getElementById("new-acc").value; if (!t.trim()) return; const r = await api("/api/accounts/add", { accounts: t }); toast("Добавлено: " + r.added); document.getElementById("new-acc").value = ""; load(); }
 async function delAcc(id) { if (!confirm("Удалить?")) return; await api("/api/accounts/delete", { id }); load(); }
+async function connectNow(id) { await api("/api/accounts/connect-now", { id }); toast("Запущен!"); setTimeout(load, 2000); }
 async function sendChat() { const id = +document.getElementById("chat-acc").value; const m = document.getElementById("chat-msg").value; if (!m) return; const r = await api("/api/chat/send", { id, message: m }); toast(r.ok ? "Отправлено" : r.error); document.getElementById("chat-msg").value = ""; }
 async function sendChatAll() { const m = document.getElementById("chat-all-msg").value; if (!m) return; const r = await api("/api/chat/send-all", { message: m }); toast("Отправляется: " + r.count); document.getElementById("chat-all-msg").value = ""; }
 

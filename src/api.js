@@ -60,6 +60,17 @@ router.post("/accounts/delete", (req, res) => {
   res.json({ ok: true });
 });
 
+// Запустить одного сразу
+router.post("/accounts/connect-now", (req, res) => {
+  const { id } = req.body;
+  try {
+    bot.connectNow(id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 // Старт/Стоп
 router.post("/start", (req, res) => {
   try {
