@@ -158,11 +158,23 @@ async function getAccessToken(channel, oauthToken, account) {
     },
   }, account);
 
-  const json = typeof res.body === "string" ? JSON.parse(res.body) : res.body;
+  // CycleTLS может вернуть body как object (JSON автопарсинг) или как string
+  let json;
+  if (typeof res.body === "object" && res.body !== null) {
+    json = res.body;
+  } else if (typeof res.body === "string" && res.body.trim()) {
+    try { json = JSON.parse(res.body); }
+    catch (e) {
+      throw new Error(`Bad JSON (status ${res.status}): ${res.body.substring(0, 100)}`);
+    }
+  } else {
+    throw new Error(`Empty response (status ${res.status})`);
+  }
+
   if (json.data && json.data.streamPlaybackAccessToken) {
     return json.data.streamPlaybackAccessToken;
   }
-  throw new Error("No token: " + (typeof res.body === "string" ? res.body.substring(0, 80) : ""));
+  throw new Error(`No token (status ${res.status}): ${JSON.stringify(json).substring(0, 200)}`);
 }
 
 async function getMasterPlaylist(channel, tokenData, account) {
@@ -184,7 +196,9 @@ async function getMasterPlaylist(channel, tokenData, account) {
 
   if (res.status !== 200) throw new Error("Playlist: " + res.status);
 
-  const text = typeof res.body === "string" ? res.body : "";
+  const text = typeof res.body === "string" ? res.body : (res.body ? JSON.stringify(res.body) : "");
+  if (!text) throw new Error("Playlist: empty body (status " + res.status + ")");
+
   const lines = text.split("\n");
   let audioOnly = null;
   let lowest = null;
