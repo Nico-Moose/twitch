@@ -74,8 +74,14 @@ function httpsRequestProxy(options, postData, agent) {
     if (agent) options.agent = agent;
     const req = https.request(options, (res) => {
       let data = "";
-      res.on("data", chunk => data += chunk);
+      let bytes = 0;
+      res.on("data", chunk => {
+        bytes += chunk.length;
+        if (bytes > 8192) { res.destroy(); return; } // лимит 8 КБ на ответ
+        data += chunk;
+      });
       res.on("end", () => resolve({ status: res.statusCode, data }));
+      res.on("error", () => resolve({ status: res.statusCode || 0, data }));
     });
     req.on("error", reject);
     req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
@@ -97,8 +103,14 @@ function httpsGetProxy(url, agent) {
 
     const req = https.request(reqOpts, (res) => {
       let data = "";
-      res.on("data", chunk => data += chunk);
+      let bytes = 0;
+      res.on("data", chunk => {
+        bytes += chunk.length;
+        if (bytes > 4096) { res.destroy(); return; } // лимит 4 КБ — плейлист не больше
+        data += chunk;
+      });
       res.on("end", () => resolve({ status: res.statusCode, data }));
+      res.on("error", () => resolve({ status: res.statusCode || 0, data }));
     });
     req.on("error", reject);
     req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
@@ -315,7 +327,7 @@ function downloadSegment(url, agent) {
       timeout: 8000,
       // Range: 0-511 — просим только первые 512 байт. Twitch отдаёт 206 Partial Content,
       // зритель засчитывается, а трафик минимален.
-      headers: { "Range": "bytes=0-255", "Connection": "close" },
+      headers: { "Range": "bytes=0-255" },
     };
     if (agent) reqOpts.agent = agent;
 
