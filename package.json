@@ -1,7 +1,7 @@
 {
   "name": "twitch-viewer-bot",
-  "version": "5.0.0",
-  "description": "Twitch viewer bot with proxy support",
+  "version": "6.0.0",
+  "description": "Twitch viewer bot with Puppeteer",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,7 +10,6 @@
     "tmi.js": "1.8.5",
     "better-sqlite3": "9.4.3",
     "express": "4.18.2",
-    "socks-proxy-agent": "8.0.2",
-    "https-proxy-agent": "7.0.4"
+    "puppeteer": "22.6.0"
   }
 }
