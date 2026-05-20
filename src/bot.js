@@ -352,8 +352,8 @@ function startHLS(account) {
       }).catch(() => {});
 
       const timer = setInterval(() => {
-        spadeTimer += 25;
-        // SPADE каждые 60 сек — именно это засчитывает "минуту просмотра"
+        spadeTimer += 15;
+        // SPADE каждые 60 сек
         if (spadeTimer >= 60) {
           spadeTimer = 0;
           sendSpadeEvent(channel, account.id, agent);
@@ -380,7 +380,7 @@ function startHLS(account) {
           if (newestSegment && newestSegment !== lastSegment) {
             lastSegment = newestSegment;
             segmentCounter++;
-            // Каждый 2-й сегмент, 128 байт
+            // Каждый 2-й сегмент, 512 байт — последние рабочие настройки
             if (segmentCounter % 2 === 0) {
               downloadSegment(newestSegment, agent);
             }
@@ -389,7 +389,7 @@ function startHLS(account) {
           errorCount++;
           if (errorCount >= 5) stopHLS(account.id);
         });
-      }, 25000); // refresh плейлиста каждые 25 сек
+      }, 15000); // refresh плейлиста каждые 15 сек — последние рабочие настройки
 
       watchers.set(account.id, { timer });
     })
@@ -420,7 +420,7 @@ function downloadSegment(url, agent) {
       method: "GET",
       timeout: 8000,
       headers: {
-        "Range": "bytes=0-127",
+        "Range": "bytes=0-511",
         "User-Agent": UA,
         "Origin": "https://www.twitch.tv",
         "Referer": "https://www.twitch.tv/",
@@ -430,7 +430,7 @@ function downloadSegment(url, agent) {
 
     const req = https.request(reqOpts, (res) => {
       let bytes = 0;
-      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 128) res.destroy(); });
+      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 512) res.destroy(); });
       res.on("end", () => {});
       res.on("error", () => {});
     });
