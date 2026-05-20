@@ -1,28 +1,40 @@
-const https = require("https");
-const { HttpsProxyAgent } = require("https-proxy-agent");
-const { SocksProxyAgent } = require("socks-proxy-agent");
+const initCycleTLS = require("cycletls");
 const db = require("./database");
 
 // proxyList: [{type, host, port, user, pass, explicitType}]
 let proxyList = [];
-let goodProxies = []; // строки в формате "type://[user:pass@]host:port"
+let goodProxies = []; // строки в формате "socks5://[user:pass@]host:port"
 let badProxies = new Set();
 let checking = false;
 
-// Жёсткий внешний таймаут на 1 прокси
-const CHECK_TIMEOUT_MS = 5000;
-// Сколько прокси проверяем параллельно
-const BATCH_SIZE = 100;
+// Жёсткий внешний таймаут на 1 запрос (секунды для CycleTLS, мс для Promise.race)
+const CHECK_TIMEOUT_S = 10;
+const CHECK_TIMEOUT_MS = 12000;
+// Сколько прокси проверяем параллельно (ограничено CycleTLS Go-бинарником)
+const BATCH_SIZE = 20;
+
+// JA3 fingerprint реального Chrome 124 — точно как в bot.js
+const CHROME_JA3 = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+const FALLBACK_CHANNEL = "twitch"; // если канал не задан в настройках
+
+let cycleTLS = null;
+async function initTLS() {
+  if (cycleTLS) return cycleTLS;
+  cycleTLS = await initCycleTLS();
+  console.log("[PROXY-CHECK] CycleTLS клиент инициализирован");
+  return cycleTLS;
+}
 
 // ---------- ПАРСИНГ ----------
 // Поддерживаемые форматы:
 //   HTTP 1.2.3.4:8080
-//   HTTPS 1.2.3.4:8080
-//   SOCKS4 1.2.3.4:1080
 //   SOCKS5 1.2.3.4:1080
 //   1.2.3.4:8080
 //   1.2.3.4:8080:user:pass
 //   user:pass@1.2.3.4:8080
+//   host:port@user:pass  (proxy.market)
 //   http://user:pass@host:port
 function parseProxy(line) {
   if (!line) return null;
@@ -32,7 +44,6 @@ function parseProxy(line) {
   let type = "http";
   let explicitType = false;
 
-  // Префикс типа: "HTTP 1.2.3.4:80"
   const prefix = s.match(/^(HTTPS?|SOCKS5H?|SOCKS4A?|SOCKS4|SOCKS5)\s+(.+)$/i);
   if (prefix) {
     const t = prefix[1].toUpperCase();
@@ -57,16 +68,12 @@ function parseProxy(line) {
     } catch (e) { return null; }
   }
 
-  // Поддерживаем два формата с @:
-  //   user:pass@host:port  (стандартный)
-  //   host:port@user:pass  (proxy.market и некоторые другие)
   let user = null, pass = null;
   if (s.includes("@")) {
     const at = s.lastIndexOf("@");
     const left = s.slice(0, at);
     const right = s.slice(at + 1);
 
-    // Определяем кто из двух частей host:port — по тому что вторая часть является числом-портом
     const leftParts = left.split(":");
     const rightParts = right.split(":");
     const leftPort = parseInt(leftParts[1], 10);
@@ -80,7 +87,7 @@ function parseProxy(line) {
       pass = rightParts.slice(1).join(":");
       s = left;
     } else {
-      // user:pass@host:port (по умолчанию)
+      // user:pass@host:port
       const ai = left.indexOf(":");
       if (ai > -1) { user = left.slice(0, ai); pass = left.slice(ai + 1); }
       else { user = left; pass = ""; }
@@ -94,15 +101,15 @@ function parseProxy(line) {
   const port = parseInt(parts[1], 10);
   if (!host || !port || isNaN(port)) return null;
 
-  // host:port:user:pass
   if (!user && parts.length >= 4) { user = parts[2]; pass = parts.slice(3).join(":"); }
 
   return { type, host, port, user, pass, explicitType };
 }
 
-function proxyToString(p) {
+// Конвертация в SOCKS5 URL — точно как в bot.js (для совместимости)
+function proxyToSocks5Url(p) {
   const auth = p.user ? `${encodeURIComponent(p.user)}:${encodeURIComponent(p.pass || "")}@` : "";
-  return `${p.type}://${auth}${p.host}:${p.port}`;
+  return `socks5://${auth}${p.host}:${p.port}`;
 }
 
 // ---------- ЗАГРУЗКА ----------
@@ -127,113 +134,163 @@ function loadProxies(text) {
   return parsed.length;
 }
 
-// ---------- ПРОВЕРКА ОДНОГО ----------
-// Стратегия: реальный POST к gql.twitch.tv/gql с тем же запросом, что делает плеер.
-// Прокси считается рабочим только если:
-//   - HTTP 200
-//   - Content-Type содержит "json"
-//   - Тело парсится как JSON и в нём есть поле data или errors (т.е. это реально Twitch GraphQL)
-// Это отсекает captive-портали, провайдерские заглушки и HTML-страницы прокси.
-const PROBE_BODY = JSON.stringify({
-  operationName: "PlaybackAccessToken_Template",
-  query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature }}',
-  variables: { isLive: true, login: "xqc", isVod: false, vodID: "", playerType: "site" },
-});
+// ---------- СТРОГАЯ ПРОВЕРКА ----------
+// Повторяем ту же цепочку запросов, что и bot.js делает в startHLS:
+//   1) POST gql.twitch.tv/gql      — получение access token
+//   2) GET  usher.ttvnw.net        — получение master playlist
+//   3) GET  edge CDN               — реальный HLS-сегмент с другой подсети
+// Прокси считается рабочим ТОЛЬКО если все три шага прошли.
+// Это гарантирует, что прокси не отвалится потом в HLS-цикле.
 
-function checkOnce(proxy, timeoutMs) {
-  return new Promise((resolve) => {
-    let done = false;
-    let req = null;
-    let killer = null;
-
-    const finish = (ok) => {
-      if (done) return;
-      done = true;
-      if (killer) clearTimeout(killer);
-      try { if (req) req.destroy(); } catch (e) {}
-      resolve(ok);
-    };
-
-    // Внешний killer — гарантия выхода
-    killer = setTimeout(() => finish(false), timeoutMs);
-
-    try {
-      let agent;
-      const auth = proxy.user ? `${encodeURIComponent(proxy.user)}:${encodeURIComponent(proxy.pass || "")}@` : "";
-
-      if (proxy.type === "socks4" || proxy.type === "socks5") {
-        const url = `${proxy.type}://${auth}${proxy.host}:${proxy.port}`;
-        agent = new SocksProxyAgent(url, { timeout: timeoutMs });
-      } else {
-        const url = `http://${auth}${proxy.host}:${proxy.port}`;
-        agent = new HttpsProxyAgent(url, { timeout: timeoutMs });
-      }
-
-      req = https.request({
-        hostname: "gql.twitch.tv",
-        path: "/gql",
-        method: "POST",
-        agent,
-        timeout: timeoutMs,
-        headers: {
-          "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(PROBE_BODY),
-          "User-Agent": "Mozilla/5.0",
-          "Connection": "close",
-        },
-      }, (res) => {
-        if (res.statusCode !== 200) { res.resume(); return finish(false); }
-        const ct = String(res.headers["content-type"] || "").toLowerCase();
-        if (!ct.includes("json")) { res.resume(); return finish(false); }
-
-        let data = "";
-        let bytes = 0;
-        res.on("data", (chunk) => {
-          bytes += chunk.length;
-          if (bytes > 32768) { res.destroy(); return finish(false); }
-          data += chunk;
-        });
-        res.on("end", () => {
-          try {
-            const json = JSON.parse(data);
-            // Twitch GraphQL всегда возвращает либо data, либо errors
-            finish(!!(json && (json.data !== undefined || json.errors)));
-          } catch (e) {
-            finish(false);
-          }
-        });
-        res.on("error", () => finish(false));
-      });
-
-      req.on("error", () => finish(false));
-      req.on("timeout", () => finish(false));
-      req.write(PROBE_BODY);
-      req.end();
-    } catch (e) {
-      finish(false);
-    }
+function buildGqlBody(channel) {
+  return JSON.stringify({
+    operationName: "PlaybackAccessToken_Template",
+    query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature } }',
+    variables: { isLive: true, login: channel, playerType: "site" },
   });
 }
 
-// Если тип явно не указан, пробуем http -> socks5 -> socks4
-async function checkProxy(proxy) {
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    promise.then(v => { clearTimeout(t); resolve(v); },
+                 e => { clearTimeout(t); reject(e); });
+  });
+}
+
+async function tlsRequest(tls, url, options, proxyUrl) {
+  const headers = Object.assign({
+    "User-Agent": UA,
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Origin": "https://www.twitch.tv",
+    "Referer": "https://www.twitch.tv/",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+  }, options.headers || {});
+
+  return withTimeout(tls(url, {
+    body: options.body || "",
+    ja3: CHROME_JA3,
+    userAgent: UA,
+    headers,
+    proxy: proxyUrl,
+    timeout: CHECK_TIMEOUT_S,
+    method: options.method || "GET",
+  }), CHECK_TIMEOUT_MS);
+}
+
+function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+// Парсит body CycleTLS (может быть object или string)
+function parseBody(res) {
+  if (!res) return null;
+  if (typeof res.body === "object" && res.body !== null) return res.body;
+  if (typeof res.body === "string" && res.body.trim()) {
+    try { return JSON.parse(res.body); } catch (e) { return null; }
+  }
+  return null;
+}
+
+// Шаг 1: gql.twitch.tv → access token
+async function step1_GetToken(tls, proxyUrl, channel) {
+  const res = await tlsRequest(tls, "https://gql.twitch.tv/gql", {
+    method: "POST",
+    body: buildGqlBody(channel),
+    headers: {
+      "Client-Id": CLIENT_ID,
+      "Content-Type": "application/json",
+    },
+  }, proxyUrl);
+
+  if (res.status !== 200) throw new Error(`gql status ${res.status}`);
+
+  const json = parseBody(res);
+  if (!json) throw new Error("gql: bad json");
+  if (!json.data || !json.data.streamPlaybackAccessToken) {
+    throw new Error("gql: no token (channel offline?)");
+  }
+  return json.data.streamPlaybackAccessToken;
+}
+
+// Шаг 2: usher.ttvnw.net → master playlist (m3u8 с URL-ами edge серверов)
+async function step2_GetMasterPlaylist(tls, proxyUrl, channel, tokenData) {
+  const params = new URLSearchParams({
+    allow_source: "true",
+    allow_audio_only: "true",
+    allow_spectre: "true",
+    p: String(rand(100000, 9999999)),
+    player: "twitchweb",
+    playlist_include_framerate: "true",
+    segment_preference: "4",
+    sig: tokenData.signature,
+    token: tokenData.value,
+    type: "any",
+  });
+
+  const url = `https://usher.ttvnw.net/api/channel/hls/${channel}.m3u8?${params.toString()}`;
+  const res = await tlsRequest(tls, url, { method: "GET" }, proxyUrl);
+
+  if (res.status !== 200) throw new Error(`usher status ${res.status}`);
+  const text = typeof res.body === "string" ? res.body : "";
+  if (!text || !text.includes("#EXTM3U")) throw new Error("usher: not an m3u8");
+
+  // Берём audio_only если есть, иначе любой первый http
+  const lines = text.split("\n");
+  let audioOnly = null;
+  let lowest = null;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes("audio_only")) {
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].startsWith("http")) { audioOnly = lines[j].trim(); break; }
+      }
+    }
+    if (lines[i].startsWith("http") && !lowest) lowest = lines[i].trim();
+  }
+  const mediaUrl = audioOnly || lowest;
+  if (!mediaUrl) throw new Error("usher: no media url");
+  return mediaUrl;
+}
+
+// Шаг 3: edge CDN → media playlist (другая подсеть, часто блочат отдельно)
+async function step3_GetMediaPlaylist(tls, proxyUrl, mediaUrl) {
+  const res = await tlsRequest(tls, mediaUrl, { method: "GET" }, proxyUrl);
+  if (res.status !== 200) throw new Error(`edge status ${res.status}`);
+  const text = typeof res.body === "string" ? res.body : "";
+  if (!text || !text.includes("#EXTM3U")) throw new Error("edge: not an m3u8");
+  return true;
+}
+
+// Проверка одного прокси: вся цепочка
+async function checkOnce(proxy, channel) {
+  const tls = await initTLS();
+  const proxyUrl = proxyToSocks5Url(proxy);
+
+  try {
+    const token = await step1_GetToken(tls, proxyUrl, channel);
+    const mediaUrl = await step2_GetMasterPlaylist(tls, proxyUrl, channel, token);
+    await step3_GetMediaPlaylist(tls, proxyUrl, mediaUrl);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Если канал оффлайн (gql вернёт null token), пробуем fallback-канал
+async function checkProxy(proxy, channel) {
   if (!proxy) return false;
 
-  let ok = await checkOnce(proxy, CHECK_TIMEOUT_MS);
-  if (ok) return true;
+  // Основная попытка на заданном канале
+  let r = await checkOnce(proxy, channel);
+  if (r.ok) return true;
 
-  if (proxy.explicitType) return false;
-
-  for (const t of ["socks5", "socks4"]) {
-    if (t === proxy.type) continue;
-    const alt = { ...proxy, type: t };
-    ok = await checkOnce(alt, CHECK_TIMEOUT_MS);
-    if (ok) {
-      proxy.type = t;
-      return true;
-    }
+  // Если шаг 1 упал из-за оффлайна канала — пробуем fallback
+  if (r.error && r.error.includes("channel offline") && channel !== FALLBACK_CHANNEL) {
+    r = await checkOnce(proxy, FALLBACK_CHANNEL);
+    if (r.ok) return true;
   }
+
   return false;
 }
 
@@ -246,8 +303,21 @@ async function checkAll() {
   }
   checking = true;
 
-  console.log(`[PROXY] Проверка ${proxyList.length} прокси (батч ${BATCH_SIZE}, таймаут ${CHECK_TIMEOUT_MS}ms)`);
-  db.addLog("proxy", `Проверка ${proxyList.length} прокси...`);
+  // Берём канал из настроек (тот же, на котором будет работать бот)
+  let channel = (db.getSetting("channel") || "").toLowerCase().trim();
+  if (!channel) channel = FALLBACK_CHANNEL;
+
+  console.log(`[PROXY] Строгая проверка ${proxyList.length} прокси по каналу "${channel}" (батч ${BATCH_SIZE})`);
+  db.addLog("proxy", `Строгая проверка ${proxyList.length} прокси (канал: ${channel})`);
+
+  // Прогрев CycleTLS
+  try { await initTLS(); }
+  catch (e) {
+    checking = false;
+    db.addLog("proxy", "Не удалось запустить CycleTLS: " + e.message);
+    console.log("[PROXY] CycleTLS init error: " + e.message);
+    return 0;
+  }
 
   goodProxies = [];
   badProxies.clear();
@@ -256,10 +326,10 @@ async function checkAll() {
 
   for (let i = 0; i < proxyList.length; i += BATCH_SIZE) {
     const batch = proxyList.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(batch.map(p => checkProxy(p)));
+    const results = await Promise.all(batch.map(p => checkProxy(p, channel).catch(() => false)));
 
     batch.forEach((p, idx) => {
-      const str = proxyToString(p);
+      const str = proxyToSocks5Url(p);
       if (results[idx]) goodProxies.push(str);
       else badProxies.add(str);
     });
