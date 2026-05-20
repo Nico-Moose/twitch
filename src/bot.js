@@ -14,16 +14,10 @@ function rand(min, max) {
 }
 
 // === ПРОКСИ ===
-// Форматы:
-//   type://[user:pass@]host:port  (предпочтительный, type = http|socks4|socks5)
-//   ip:port
-//   ip:port:user:pass
-//   user:pass@ip:port
 function parseProxy(proxyStr) {
   if (!proxyStr || !proxyStr.trim()) return null;
   const p = proxyStr.trim();
 
-  // С схемой
   if (/^(https?|socks[45]):\/\//i.test(p)) {
     try {
       const u = new URL(p);
@@ -39,7 +33,6 @@ function parseProxy(proxyStr) {
     } catch (e) { return null; }
   }
 
-  // user:pass@host:port
   if (p.includes("@")) {
     const at = p.lastIndexOf("@");
     const auth = p.slice(0, at);
@@ -60,7 +53,6 @@ function parseProxy(proxyStr) {
 function createAgent(proxyStr) {
   const proxy = parseProxy(proxyStr);
   if (!proxy || !proxy.host || !proxy.port) return null;
-
   const auth = proxy.user ? `${encodeURIComponent(proxy.user)}:${encodeURIComponent(proxy.pass || "")}@` : "";
   if (proxy.type === "socks4" || proxy.type === "socks5") {
     return new SocksProxyAgent(`${proxy.type}://${auth}${proxy.host}:${proxy.port}`);
@@ -69,15 +61,17 @@ function createAgent(proxyStr) {
 }
 
 // === HTTPS с прокси ===
-function httpsRequestProxy(options, postData, agent) {
+// maxBytes — лимит на чтение ответа (экономия трафика)
+function httpsRequestProxy(options, postData, agent, maxBytes) {
   return new Promise((resolve, reject) => {
     if (agent) options.agent = agent;
     const req = https.request(options, (res) => {
       let data = "";
       let bytes = 0;
+      const limit = maxBytes || 32768;
       res.on("data", chunk => {
         bytes += chunk.length;
-        if (bytes > 16384) { res.destroy(); return; } // лимит 16 КБ на ответ
+        if (bytes > limit) { res.destroy(); return; }
         data += chunk;
       });
       res.on("end", () => resolve({ status: res.statusCode, data }));
@@ -90,7 +84,7 @@ function httpsRequestProxy(options, postData, agent) {
   });
 }
 
-function httpsGetProxy(url, agent) {
+function httpsGetProxy(url, agent, maxBytes) {
   return new Promise((resolve, reject) => {
     const opts = new URL(url);
     const reqOpts = {
@@ -104,9 +98,10 @@ function httpsGetProxy(url, agent) {
     const req = https.request(reqOpts, (res) => {
       let data = "";
       let bytes = 0;
+      const limit = maxBytes || 32768;
       res.on("data", chunk => {
         bytes += chunk.length;
-        if (bytes > 4096) { res.destroy(); return; } // лимит 4 КБ — плейлист не больше
+        if (bytes > limit) { res.destroy(); return; }
         data += chunk;
       });
       res.on("end", () => resolve({ status: res.statusCode, data }));
@@ -127,7 +122,6 @@ function connect(account) {
 
   const token = account.token.startsWith("oauth:") ? account.token : "oauth:" + account.token;
 
-  // tmi.js не поддерживает прокси напрямую, подключаем без прокси (IRC не влияет на viewer count)
   const client = new tmi.Client({
     options: { debug: false },
     connection: { reconnect: true, secure: true },
@@ -160,17 +154,14 @@ function disconnect(id) {
 }
 
 function disconnectAll() {
-  for (const [id] of clients) {
-    disconnect(id);
-  }
+  for (const [id] of clients) disconnect(id);
   db.resetAll();
 }
 
 // === HLS С ПРОКСИ ===
 
-// Кэш access token на уровне канала — все боты смотрят один канал,
-// токен одинаковый, нет смысла запрашивать 19 раз.
-// Живёт 3 часа (Twitch выдаёт на ~4 часа).
+// Кэш access token на уровне канала (все боты смотрят один канал).
+// Живёт 3 часа — экономит 18 из 19 запросов при старте.
 let tokenCache = { channel: null, data: null, expires: 0 };
 
 function getAccessToken(channel, oauthToken, agent) {
@@ -180,11 +171,10 @@ function getAccessToken(channel, oauthToken, agent) {
   }
 
   const cleanToken = oauthToken.replace("oauth:", "");
-  // Корректный минимальный GraphQL запрос — без $vodID в variables
   const body = JSON.stringify({
     operationName: "PlaybackAccessToken_Template",
-    query: 'query PlaybackAccessToken_Template($login:String!,$isLive:Boolean!,$playerType:String!){streamPlaybackAccessToken(channelName:$login,params:{platform:"web",playerBackend:"mediaplayer",playerType:$playerType})@include(if:$isLive){value signature}}',
-    variables: { isLive: true, login: channel, playerType: "site" },
+    query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature }}',
+    variables: { isLive: true, login: channel, isVod: false, vodID: "", playerType: "site" },
   });
 
   return httpsRequestProxy({
@@ -197,7 +187,7 @@ function getAccessToken(channel, oauthToken, agent) {
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(body),
     }
-  }, body, agent).then(res => {
+  }, body, agent, 16384).then(res => {
     const json = JSON.parse(res.data);
     if (json.data && json.data.streamPlaybackAccessToken) {
       tokenCache = { channel, data: json.data.streamPlaybackAccessToken, expires: now + 3 * 60 * 60 * 1000 };
@@ -208,16 +198,19 @@ function getAccessToken(channel, oauthToken, agent) {
 }
 
 function getMasterPlaylist(channel, tokenData, agent) {
-  // Минимальный набор параметров — только обязательные sig/token + audio_only
   const params = new URLSearchParams({
+    allow_source: "true",
     allow_audio_only: "true",
     sig: tokenData.signature,
     token: tokenData.value,
     p: String(rand(100000, 9999999)),
+    player: "twitchweb",
+    type: "any",
   });
 
   const url = `https://usher.ttvnw.net/api/channel/hls/${channel}.m3u8?${params.toString()}`;
-  return httpsGetProxy(url, agent).then(res => {
+  // Лимит 16 КБ — master playlist бывает до 10 КБ, нужен полностью
+  return httpsGetProxy(url, agent, 16384).then(res => {
     if (res.status !== 200) throw new Error("Playlist: " + res.status);
     const lines = res.data.split("\n");
     let audioOnly = null;
@@ -232,13 +225,11 @@ function getMasterPlaylist(channel, tokenData, agent) {
         allUrls.push(lines[i].trim());
       }
     }
+    // audio_only — минимум трафика. Если нет — самое низкое качество (последнее в списке).
     const lowest = allUrls.length ? allUrls[allUrls.length - 1] : null;
     return audioOnly || lowest;
   });
 }
-
-// Кэш media playlist URL: { accountId -> { url, expires } }
-const playlistCache = new Map();
 
 function startHLS(account) {
   const channel = db.getSetting("channel");
@@ -246,96 +237,82 @@ function startHLS(account) {
   if (watchers.has(account.id)) return;
 
   const token = account.token.startsWith("oauth:") ? account.token : "oauth:" + account.token;
-
-  // Создаём прокси-агент для этого аккаунта
   const agent = account.proxy ? createAgent(account.proxy) : null;
-  // Короткий человекочитаемый лейбл: type host:port
+
   let proxyLabel = " [no proxy]";
   if (account.proxy) {
     const pp = parseProxy(account.proxy);
     proxyLabel = pp ? ` [${pp.type} ${pp.host}:${pp.port}]` : ` [${account.proxy}]`;
   }
 
-  // Используем кэшированный URL плейлиста если он не старше 90 минут
-  // (access token Twitch живёт ~4 часа, но перестрахуемся)
-  const cached = playlistCache.get(account.id);
-  const now = Date.now();
-  const getPlaylistUrl = (cached && cached.expires > now)
-    ? Promise.resolve(cached.url)
-    : getAccessToken(channel, token, agent)
-        .then(tokenData => getMasterPlaylist(channel, tokenData, agent))
-        .then(url => {
-          playlistCache.set(account.id, { url, expires: now + 90 * 60 * 1000 });
-          return url;
-        });
-
-  getPlaylistUrl.then(mediaPlaylistUrl => {
-    if (!mediaPlaylistUrl) {
-      console.log(`[HLS] ${account.login}: нет playlist${proxyLabel}`);
-      return;
-    }
-
-    console.log(`[HLS] ${account.login} смотрит поток${proxyLabel}`);
-    db.addLog("hls", account.login + " смотрит" + proxyLabel);
-
-    let errorCount = 0;
-    let lastSegment = "";
-    let segmentCounter = 0;
-
-    const timer = setInterval(() => {
-      httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
-        if (res.status !== 200) {
-          errorCount++;
-          if (errorCount >= 3) {
-            stopHLS(account.id);
-            setTimeout(() => startHLS(account), 10000 + rand(0, 5000));
-          }
-          return;
-        }
-        errorCount = 0;
-
-        const lines = res.data.split("\n");
-        let newestSegment = null;
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i].trim();
-          if (line && !line.startsWith("#")) { newestSegment = line; break; }
-        }
-
-        // Качаем каждый 2-й новый сегмент по 128 байт через Range.
-        // Twitch обновляет счётчик каждые ~2 мин — нужен хотя бы 1 сегмент за это время.
-        // При интервале 25 сек и каждом 2-м сегменте = 1 запрос каждые ~50 сек. Достаточно.
-        if (newestSegment && newestSegment !== lastSegment) {
-          lastSegment = newestSegment;
-          segmentCounter++;
-          if (segmentCounter % 2 === 0) {
-            downloadSegment(newestSegment, agent);
-          }
-        }
-      }).catch(() => {
-        errorCount++;
-        if (errorCount >= 5) stopHLS(account.id);
-      });
-    }, 25000); // refresh плейлиста каждые 25 сек
-
-    watchers.set(account.id, { timer });
-  }).catch(err => {
-    console.log(`[HLS] ${account.login}: ${err.message}${proxyLabel}`);
-    // Прокси не работает — помечаем и берём другой из пула
-    if (account.proxy) {
-      proxyPool.markBad(account.proxy);
-      const newProxy = proxyPool.getProxy(account.id);
-      if (newProxy && newProxy !== account.proxy) {
-        db.setProxy(account.id, newProxy);
-        playlistCache.delete(account.id); // сбрасываем кэш — новый прокси, новый агент
-        const np = parseProxy(newProxy);
-        const npLabel = np ? `${np.type} ${np.host}:${np.port}` : newProxy;
-        console.log(`[HLS] ${account.login}: сменили прокси на ${npLabel}`);
-        // Пробуем с новым прокси
-        const updatedAccount = db.getAccountById(account.id);
-        setTimeout(() => startHLS(updatedAccount), 3000);
+  getAccessToken(channel, token, agent)
+    .then(tokenData => getMasterPlaylist(channel, tokenData, agent))
+    .then(mediaPlaylistUrl => {
+      if (!mediaPlaylistUrl) {
+        console.log(`[HLS] ${account.login}: нет playlist${proxyLabel}`);
+        return;
       }
-    }
-  });
+
+      console.log(`[HLS] ${account.login} смотрит поток${proxyLabel}`);
+      db.addLog("hls", account.login + " смотрит" + proxyLabel);
+
+      let errorCount = 0;
+      let lastSegment = "";
+      let segmentCounter = 0;
+
+      const timer = setInterval(() => {
+        // Media playlist лимит 8 КБ — достаточно для списка сегментов
+        httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
+          if (res.status !== 200) {
+            errorCount++;
+            if (errorCount >= 3) {
+              stopHLS(account.id);
+              setTimeout(() => startHLS(account), 10000 + rand(0, 5000));
+            }
+            return;
+          }
+          errorCount = 0;
+
+          const lines = res.data.split("\n");
+          let newestSegment = null;
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            if (line && !line.startsWith("#")) { newestSegment = line; break; }
+          }
+
+          if (newestSegment && newestSegment !== lastSegment) {
+            lastSegment = newestSegment;
+            segmentCounter++;
+            // Каждый 2-й сегмент, 128 байт — Twitch засчитывает зрителя.
+            // 1 сегмент каждые ~50 сек — попадает в окно обновления счётчика (~2 мин).
+            if (segmentCounter % 2 === 0) {
+              downloadSegment(newestSegment, agent);
+            }
+          }
+        }).catch(() => {
+          errorCount++;
+          if (errorCount >= 5) stopHLS(account.id);
+        });
+      }, 25000); // refresh плейлиста каждые 25 сек
+
+      watchers.set(account.id, { timer });
+    })
+    .catch(err => {
+      console.log(`[HLS] ${account.login}: ${err.message}${proxyLabel}`);
+      if (account.proxy) {
+        proxyPool.markBad(account.proxy);
+        const newProxy = proxyPool.getProxy(account.id);
+        if (newProxy && newProxy !== account.proxy) {
+          db.setProxy(account.id, newProxy);
+          tokenCache = { channel: null, data: null, expires: 0 }; // сброс кэша токена
+          const np = parseProxy(newProxy);
+          const npLabel = np ? `${np.type} ${np.host}:${np.port}` : newProxy;
+          console.log(`[HLS] ${account.login}: сменили прокси на ${npLabel}`);
+          const updatedAccount = db.getAccountById(account.id);
+          setTimeout(() => startHLS(updatedAccount), 3000);
+        }
+      }
+    });
 }
 
 function downloadSegment(url, agent) {
@@ -346,9 +323,7 @@ function downloadSegment(url, agent) {
       path: opts.pathname + opts.search,
       method: "GET",
       timeout: 8000,
-      // Range: 0-511 — просим только первые 512 байт. Twitch отдаёт 206 Partial Content,
-      // зритель засчитывается, а трафик минимален.
-      headers: { "Range": "bytes=0-127" },
+      headers: { "Range": "bytes=0-127" }, // только 128 байт
     };
     if (agent) reqOpts.agent = agent;
 
