@@ -1,7 +1,5 @@
 const tmi = require("tmi.js");
 const https = require("https");
-const http = require("http");
-const crypto = require("crypto");
 const { SocksProxyAgent } = require("socks-proxy-agent");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const db = require("./database");
@@ -11,22 +9,8 @@ const clients = new Map();
 const watchers = new Map();
 let loopTimer = null;
 
-// Браузерный User-Agent — одинаковый для всех запросов
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-const CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko";
-
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-// Генерация уникального device-id для аккаунта (как у реального браузера)
-// Сохраняем в памяти по account.id
-const deviceIds = new Map();
-function getDeviceId(accountId) {
-  if (!deviceIds.has(accountId)) {
-    deviceIds.set(accountId, crypto.randomUUID());
-  }
-  return deviceIds.get(accountId);
 }
 
 // === ПРОКСИ ===
@@ -77,24 +61,13 @@ function createAgent(proxyStr) {
 }
 
 // === HTTPS с прокси ===
-function httpsRequestProxy(options, postData, agent, maxBytes) {
+function httpsRequestProxy(options, postData, agent) {
   return new Promise((resolve, reject) => {
     if (agent) options.agent = agent;
-    if (!options.headers) options.headers = {};
-    if (!options.headers["User-Agent"]) options.headers["User-Agent"] = UA;
-    if (!options.headers["Client-Id"]) options.headers["Client-Id"] = CLIENT_ID;
-
     const req = https.request(options, (res) => {
       let data = "";
-      let bytes = 0;
-      const limit = maxBytes || 32768;
-      res.on("data", chunk => {
-        bytes += chunk.length;
-        if (bytes > limit) { res.destroy(); return; }
-        data += chunk;
-      });
+      res.on("data", chunk => data += chunk);
       res.on("end", () => resolve({ status: res.statusCode, data }));
-      res.on("error", () => resolve({ status: res.statusCode || 0, data }));
     });
     req.on("error", reject);
     req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
@@ -103,7 +76,7 @@ function httpsRequestProxy(options, postData, agent, maxBytes) {
   });
 }
 
-function httpsGetProxy(url, agent, maxBytes) {
+function httpsGetProxy(url, agent) {
   return new Promise((resolve, reject) => {
     const opts = new URL(url);
     const reqOpts = {
@@ -111,81 +84,18 @@ function httpsGetProxy(url, agent, maxBytes) {
       path: opts.pathname + opts.search,
       method: "GET",
       timeout: 15000,
-      headers: {
-        "User-Agent": UA,
-        "Client-Id": CLIENT_ID,
-        "Origin": "https://www.twitch.tv",
-        "Referer": "https://www.twitch.tv/",
-      },
     };
     if (agent) reqOpts.agent = agent;
 
     const req = https.request(reqOpts, (res) => {
       let data = "";
-      let bytes = 0;
-      const limit = maxBytes || 32768;
-      res.on("data", chunk => {
-        bytes += chunk.length;
-        if (bytes > limit) { res.destroy(); return; }
-        data += chunk;
-      });
+      res.on("data", chunk => data += chunk);
       res.on("end", () => resolve({ status: res.statusCode, data }));
-      res.on("error", () => resolve({ status: res.statusCode || 0, data }));
     });
     req.on("error", reject);
     req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
     req.end();
   });
-}
-
-// === SPADE TRACKING ===
-// Twitch использует SPADE для подсчёта зрителей.
-// Без этого запроса бот виден в чате, но НЕ засчитывается в счётчик просмотров.
-// Событие "minute-watched" — именно оно прибавляет +1 к viewer count.
-function sendSpadeEvent(channel, accountId, agent) {
-  try {
-    const deviceId = getDeviceId(accountId);
-    const event = {
-      event: "minute-watched",
-      properties: {
-        channel: channel.toLowerCase(),
-        broadcast_id: "",
-        player: "site",
-        user_id: accountId,
-        device_id: deviceId,
-        platform: "web",
-        game: "",
-        live: true,
-      },
-    };
-
-    // Кодируем как base64 JSON — именно так Twitch SPADE принимает данные
-    const payload = Buffer.from(JSON.stringify([event])).toString("base64");
-    const body = `data=${encodeURIComponent(payload)}`;
-
-    const reqOpts = {
-      hostname: "spade.twitch.tv",
-      path: "/track",
-      method: "POST",
-      timeout: 10000,
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Content-Length": Buffer.byteLength(body),
-        "User-Agent": UA,
-        "Origin": "https://www.twitch.tv",
-        "Referer": "https://www.twitch.tv/",
-      },
-    };
-    if (agent) reqOpts.agent = agent;
-
-    const req = https.request(reqOpts, (res) => {
-      res.resume(); // читаем и выбрасываем ответ
-    });
-    req.on("error", () => {}); // тихо игнорируем ошибки
-    req.setTimeout(10000, () => { req.destroy(); });
-    req.write(body);
-    req.end();
-  } catch (e) {}
 }
 
 // === IRC ПОДКЛЮЧЕНИЕ ===
@@ -234,9 +144,9 @@ function disconnectAll() {
 }
 
 // === HLS С ПРОКСИ ===
-
 function getAccessToken(channel, oauthToken, agent) {
   const cleanToken = oauthToken.replace("oauth:", "");
+  // Корректный GraphQL — без неиспользуемых $vodID/$isVod (Twitch перестал их принимать)
   const body = JSON.stringify({
     operationName: "PlaybackAccessToken_Template",
     query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature } }',
@@ -248,12 +158,12 @@ function getAccessToken(channel, oauthToken, agent) {
     path: "/gql",
     method: "POST",
     headers: {
-      "Client-Id": CLIENT_ID,
+      "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
       "Authorization": "OAuth " + cleanToken,
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(body),
     }
-  }, body, agent, 16384).then(res => {
+  }, body, agent).then(res => {
     const json = JSON.parse(res.data);
     if (json.data && json.data.streamPlaybackAccessToken) {
       return json.data.streamPlaybackAccessToken;
@@ -266,30 +176,33 @@ function getMasterPlaylist(channel, tokenData, agent) {
   const params = new URLSearchParams({
     allow_source: "true",
     allow_audio_only: "true",
-    sig: tokenData.signature,
-    token: tokenData.value,
+    allow_spectre: "true",
     p: String(rand(100000, 9999999)),
     player: "twitchweb",
+    playlist_include_framerate: "true",
+    segment_preference: "4",
+    sig: tokenData.signature,
+    token: tokenData.value,
     type: "any",
   });
 
   const url = `https://usher.ttvnw.net/api/channel/hls/${channel}.m3u8?${params.toString()}`;
-  return httpsGetProxy(url, agent, 16384).then(res => {
+  return httpsGetProxy(url, agent).then(res => {
     if (res.status !== 200) throw new Error("Playlist: " + res.status);
     const lines = res.data.split("\n");
     let audioOnly = null;
-    const allUrls = [];
+    let lowest = null;
 
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].includes("audio_only")) {
         for (let j = i + 1; j < lines.length; j++) {
           if (lines[j].startsWith("http")) { audioOnly = lines[j].trim(); break; }
         }
-      } else if (lines[i].startsWith("http")) {
-        allUrls.push(lines[i].trim());
+      }
+      if (lines[i].startsWith("http") && !lowest) {
+        lowest = lines[i].trim();
       }
     }
-    const lowest = allUrls.length ? allUrls[allUrls.length - 1] : null;
     return audioOnly || lowest;
   });
 }
@@ -308,107 +221,76 @@ function startHLS(account) {
     proxyLabel = pp ? ` [${pp.type} ${pp.host}:${pp.port}]` : ` [${account.proxy}]`;
   }
 
-  getAccessToken(channel, token, agent)
-    .then(tokenData => getMasterPlaylist(channel, tokenData, agent))
-    .then(mediaPlaylistUrl => {
-      if (!mediaPlaylistUrl) {
-        console.log(`[HLS] ${account.login}: нет playlist${proxyLabel}`);
-        return;
-      }
+  getAccessToken(channel, token, agent).then(tokenData => {
+    return getMasterPlaylist(channel, tokenData, agent);
+  }).then(mediaPlaylistUrl => {
+    if (!mediaPlaylistUrl) {
+      console.log(`[HLS] ${account.login}: нет playlist${proxyLabel}`);
+      return;
+    }
 
-      console.log(`[HLS] ${account.login} смотрит поток${proxyLabel}`);
-      db.addLog("hls", account.login + " смотрит" + proxyLabel);
+    console.log(`[HLS] ${account.login} смотрит поток${proxyLabel}`);
+    db.addLog("hls", account.login + " смотрит" + proxyLabel);
 
-      let errorCount = 0;
-      let lastSegment = "";
-      let segmentCounter = 0;
+    let errorCount = 0;
+    let lastSegment = "";
 
-      // Сразу качаем первый сегмент при старте
-      httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
-        if (res.status !== 200) return;
+    const timer = setInterval(() => {
+      httpsGetProxy(mediaPlaylistUrl, agent).then(res => {
+        if (res.status !== 200) {
+          errorCount++;
+          if (errorCount >= 3) {
+            stopHLS(account.id);
+            setTimeout(() => startHLS(account), 10000 + rand(0, 5000));
+          }
+          return;
+        }
+        errorCount = 0;
+
         const lines = res.data.split("\n");
+        let newestSegment = null;
         for (let i = lines.length - 1; i >= 0; i--) {
           const line = lines[i].trim();
-          if (line && !line.startsWith("#")) {
-            lastSegment = line;
-            downloadSegment(line, agent);
-            break;
-          }
+          if (line && !line.startsWith("#")) { newestSegment = line; break; }
         }
-      }).catch(() => {});
 
-      const timer = setInterval(() => {
-        httpsGetProxy(mediaPlaylistUrl, agent, 4096).then(res => {
-          if (res.status !== 200) {
-            errorCount++;
-            if (errorCount >= 3) {
-              stopHLS(account.id);
-              setTimeout(() => startHLS(account), 10000 + rand(0, 5000));
-            }
-            return;
-          }
-          errorCount = 0;
-
-          const lines = res.data.split("\n");
-          let newestSegment = null;
-          for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (line && !line.startsWith("#")) { newestSegment = line; break; }
-          }
-
-          if (newestSegment && newestSegment !== lastSegment) {
-            lastSegment = newestSegment;
-            segmentCounter++;
-            // Каждый 3-й сегмент, 256 байт
-            if (segmentCounter % 3 === 0) {
-              downloadSegment(newestSegment, agent);
-            }
-          }
-        }).catch(() => {
-          errorCount++;
-          if (errorCount >= 5) stopHLS(account.id);
-        });
-      }, 20000); // refresh плейлиста каждые 20 сек
-
-      watchers.set(account.id, { timer });
-    })
-    .catch(err => {
-      console.log(`[HLS] ${account.login}: ${err.message}${proxyLabel}`);
-      if (account.proxy) {
-        proxyPool.markBad(account.proxy);
-        const newProxy = proxyPool.getProxy(account.id);
-        if (newProxy && newProxy !== account.proxy) {
-          db.setProxy(account.id, newProxy);
-          const np = parseProxy(newProxy);
-          const npLabel = np ? `${np.type} ${np.host}:${np.port}` : newProxy;
-          console.log(`[HLS] ${account.login}: сменили прокси на ${npLabel}`);
-          const updatedAccount = db.getAccountById(account.id);
-          setTimeout(() => startHLS(updatedAccount), 3000);
+        if (newestSegment && newestSegment !== lastSegment) {
+          lastSegment = newestSegment;
+          downloadSegment(newestSegment, agent);
         }
+      }).catch(() => {
+        errorCount++;
+        if (errorCount >= 5) stopHLS(account.id);
+      });
+    }, 5000);
+
+    watchers.set(account.id, { timer });
+  }).catch(err => {
+    console.log(`[HLS] ${account.login}: ${err.message}${proxyLabel}`);
+    if (account.proxy) {
+      proxyPool.markBad(account.proxy);
+      const newProxy = proxyPool.getProxy(account.id);
+      if (newProxy && newProxy !== account.proxy) {
+        db.setProxy(account.id, newProxy);
+        const np = parseProxy(newProxy);
+        const npLabel = np ? `${np.type} ${np.host}:${np.port}` : newProxy;
+        console.log(`[HLS] ${account.login}: сменили прокси на ${npLabel}`);
+        const updatedAccount = db.getAccountById(account.id);
+        setTimeout(() => startHLS(updatedAccount), 3000);
       }
-    });
+    }
+  });
 }
 
 function downloadSegment(url, agent) {
   try {
     const opts = new URL(url);
-    const reqOpts = {
-      hostname: opts.hostname,
-      path: opts.pathname + opts.search,
-      method: "GET",
-      timeout: 8000,
-      headers: {
-        "Range": "bytes=0-255",
-        "User-Agent": UA,
-        "Origin": "https://www.twitch.tv",
-        "Referer": "https://www.twitch.tv/",
-      },
-    };
+    const reqOpts = { hostname: opts.hostname, path: opts.pathname + opts.search, method: "GET", timeout: 8000 };
     if (agent) reqOpts.agent = agent;
 
     const req = https.request(reqOpts, (res) => {
       let bytes = 0;
-      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 256) res.destroy(); });
+      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 16000) res.destroy(); });
       res.on("end", () => {});
       res.on("error", () => {});
     });
