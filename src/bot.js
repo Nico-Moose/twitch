@@ -1,5 +1,7 @@
 const tmi = require("tmi.js");
 const https = require("https");
+const http = require("http");
+const crypto = require("crypto");
 const { SocksProxyAgent } = require("socks-proxy-agent");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const db = require("./database");
@@ -9,8 +11,22 @@ const clients = new Map();
 const watchers = new Map();
 let loopTimer = null;
 
+// Браузерный User-Agent — одинаковый для всех запросов
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Генерация уникального device-id для аккаунта (как у реального браузера)
+// Сохраняем в памяти по account.id
+const deviceIds = new Map();
+function getDeviceId(accountId) {
+  if (!deviceIds.has(accountId)) {
+    deviceIds.set(accountId, crypto.randomUUID());
+  }
+  return deviceIds.get(accountId);
 }
 
 // === ПРОКСИ ===
@@ -61,14 +77,13 @@ function createAgent(proxyStr) {
 }
 
 // === HTTPS с прокси ===
-// maxBytes — лимит на чтение ответа (экономия трафика)
 function httpsRequestProxy(options, postData, agent, maxBytes) {
   return new Promise((resolve, reject) => {
     if (agent) options.agent = agent;
-    // Браузерные заголовки — Twitch фильтрует запросы без User-Agent
     if (!options.headers) options.headers = {};
-    if (!options.headers["User-Agent"]) options.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-    if (!options.headers["Client-Id"]) options.headers["Client-Id"] = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+    if (!options.headers["User-Agent"]) options.headers["User-Agent"] = UA;
+    if (!options.headers["Client-Id"]) options.headers["Client-Id"] = CLIENT_ID;
+
     const req = https.request(options, (res) => {
       let data = "";
       let bytes = 0;
@@ -97,8 +112,8 @@ function httpsGetProxy(url, agent, maxBytes) {
       method: "GET",
       timeout: 15000,
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        "User-Agent": UA,
+        "Client-Id": CLIENT_ID,
         "Origin": "https://www.twitch.tv",
         "Referer": "https://www.twitch.tv/",
       },
@@ -121,6 +136,56 @@ function httpsGetProxy(url, agent, maxBytes) {
     req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
     req.end();
   });
+}
+
+// === SPADE TRACKING ===
+// Twitch использует SPADE для подсчёта зрителей.
+// Без этого запроса бот виден в чате, но НЕ засчитывается в счётчик просмотров.
+// Событие "minute-watched" — именно оно прибавляет +1 к viewer count.
+function sendSpadeEvent(channel, accountId, agent) {
+  try {
+    const deviceId = getDeviceId(accountId);
+    const event = {
+      event: "minute-watched",
+      properties: {
+        channel: channel.toLowerCase(),
+        broadcast_id: "",
+        player: "site",
+        user_id: accountId,
+        device_id: deviceId,
+        platform: "web",
+        game: "",
+        live: true,
+      },
+    };
+
+    // Кодируем как base64 JSON — именно так Twitch SPADE принимает данные
+    const payload = Buffer.from(JSON.stringify([event])).toString("base64");
+    const body = `data=${encodeURIComponent(payload)}`;
+
+    const reqOpts = {
+      hostname: "spade.twitch.tv",
+      path: "/track",
+      method: "POST",
+      timeout: 10000,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(body),
+        "User-Agent": UA,
+        "Origin": "https://www.twitch.tv",
+        "Referer": "https://www.twitch.tv/",
+      },
+    };
+    if (agent) reqOpts.agent = agent;
+
+    const req = https.request(reqOpts, (res) => {
+      res.resume(); // читаем и выбрасываем ответ
+    });
+    req.on("error", () => {}); // тихо игнорируем ошибки
+    req.setTimeout(10000, () => { req.destroy(); });
+    req.write(body);
+    req.end();
+  } catch (e) {}
 }
 
 // === IRC ПОДКЛЮЧЕНИЕ ===
@@ -192,7 +257,7 @@ function getAccessToken(channel, oauthToken, agent) {
     path: "/gql",
     method: "POST",
     headers: {
-      "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      "Client-Id": CLIENT_ID,
       "Authorization": "OAuth " + cleanToken,
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(body),
@@ -219,7 +284,6 @@ function getMasterPlaylist(channel, tokenData, agent) {
   });
 
   const url = `https://usher.ttvnw.net/api/channel/hls/${channel}.m3u8?${params.toString()}`;
-  // Лимит 16 КБ — master playlist бывает до 10 КБ, нужен полностью
   return httpsGetProxy(url, agent, 16384).then(res => {
     if (res.status !== 200) throw new Error("Playlist: " + res.status);
     const lines = res.data.split("\n");
@@ -235,7 +299,6 @@ function getMasterPlaylist(channel, tokenData, agent) {
         allUrls.push(lines[i].trim());
       }
     }
-    // audio_only — минимум трафика. Если нет — самое низкое качество (последнее в списке).
     const lowest = allUrls.length ? allUrls[allUrls.length - 1] : null;
     return audioOnly || lowest;
   });
@@ -266,29 +329,36 @@ function startHLS(account) {
       console.log(`[HLS] ${account.login} смотрит поток${proxyLabel}`);
       db.addLog("hls", account.login + " смотрит" + proxyLabel);
 
+      // Сразу отправляем SPADE-событие — это и есть +1 к счётчику зрителей
+      sendSpadeEvent(channel, account.id, agent);
+
       let errorCount = 0;
       let lastSegment = "";
       let segmentCounter = 0;
+      let spadeTimer = 0; // счётчик для SPADE (каждые 60 сек)
 
       // Сразу качаем первый сегмент — Twitch должен увидеть активность немедленно
-      const kickstart = () => {
-        httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
-          if (res.status !== 200) return;
-          const lines = res.data.split("\n");
-          for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (line && !line.startsWith("#")) {
-              lastSegment = line;
-              downloadSegment(line, agent);
-              break;
-            }
+      httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
+        if (res.status !== 200) return;
+        const lines = res.data.split("\n");
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i].trim();
+          if (line && !line.startsWith("#")) {
+            lastSegment = line;
+            downloadSegment(line, agent);
+            break;
           }
-        }).catch(() => {});
-      };
-      kickstart();
+        }
+      }).catch(() => {});
 
       const timer = setInterval(() => {
-        // Media playlist лимит 8 КБ — достаточно для списка сегментов
+        spadeTimer += 25;
+        // SPADE каждые 60 сек — именно это засчитывает "минуту просмотра"
+        if (spadeTimer >= 60) {
+          spadeTimer = 0;
+          sendSpadeEvent(channel, account.id, agent);
+        }
+
         httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
           if (res.status !== 200) {
             errorCount++;
@@ -310,8 +380,7 @@ function startHLS(account) {
           if (newestSegment && newestSegment !== lastSegment) {
             lastSegment = newestSegment;
             segmentCounter++;
-            // Каждый 2-й сегмент, 128 байт — Twitch засчитывает зрителя.
-            // 1 сегмент каждые ~50 сек — попадает в окно обновления счётчика (~2 мин).
+            // Каждый 2-й сегмент, 128 байт
             if (segmentCounter % 2 === 0) {
               downloadSegment(newestSegment, agent);
             }
@@ -331,7 +400,7 @@ function startHLS(account) {
         const newProxy = proxyPool.getProxy(account.id);
         if (newProxy && newProxy !== account.proxy) {
           db.setProxy(account.id, newProxy);
-          tokenCache = { channel: null, data: null, expires: 0 }; // сброс кэша токена
+          tokenCache = { channel: null, data: null, expires: 0 };
           const np = parseProxy(newProxy);
           const npLabel = np ? `${np.type} ${np.host}:${np.port}` : newProxy;
           console.log(`[HLS] ${account.login}: сменили прокси на ${npLabel}`);
@@ -352,7 +421,7 @@ function downloadSegment(url, agent) {
       timeout: 8000,
       headers: {
         "Range": "bytes=0-127",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": UA,
         "Origin": "https://www.twitch.tv",
         "Referer": "https://www.twitch.tv/",
       },
