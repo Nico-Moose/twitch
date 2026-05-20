@@ -235,16 +235,7 @@ function disconnectAll() {
 
 // === HLS С ПРОКСИ ===
 
-// Кэш access token на уровне канала (все боты смотрят один канал).
-// Живёт 3 часа — экономит 18 из 19 запросов при старте.
-let tokenCache = { channel: null, data: null, expires: 0 };
-
 function getAccessToken(channel, oauthToken, agent) {
-  const now = Date.now();
-  if (tokenCache.channel === channel && tokenCache.expires > now) {
-    return Promise.resolve(tokenCache.data);
-  }
-
   const cleanToken = oauthToken.replace("oauth:", "");
   const body = JSON.stringify({
     operationName: "PlaybackAccessToken_Template",
@@ -265,8 +256,7 @@ function getAccessToken(channel, oauthToken, agent) {
   }, body, agent, 16384).then(res => {
     const json = JSON.parse(res.data);
     if (json.data && json.data.streamPlaybackAccessToken) {
-      tokenCache = { channel, data: json.data.streamPlaybackAccessToken, expires: now + 3 * 60 * 60 * 1000 };
-      return tokenCache.data;
+      return json.data.streamPlaybackAccessToken;
     }
     throw new Error("No token: " + res.data.substring(0, 80));
   });
@@ -329,15 +319,11 @@ function startHLS(account) {
       console.log(`[HLS] ${account.login} смотрит поток${proxyLabel}`);
       db.addLog("hls", account.login + " смотрит" + proxyLabel);
 
-      // Сразу отправляем SPADE-событие — это и есть +1 к счётчику зрителей
-      sendSpadeEvent(channel, account.id, agent);
-
       let errorCount = 0;
       let lastSegment = "";
       let segmentCounter = 0;
-      let spadeTimer = 0; // счётчик для SPADE (каждые 60 сек)
 
-      // Сразу качаем первый сегмент — Twitch должен увидеть активность немедленно
+      // Сразу качаем первый сегмент при старте
       httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
         if (res.status !== 200) return;
         const lines = res.data.split("\n");
@@ -352,12 +338,6 @@ function startHLS(account) {
       }).catch(() => {});
 
       const timer = setInterval(() => {
-        spadeTimer += 20;
-        if (spadeTimer >= 60) {
-          spadeTimer = 0;
-          sendSpadeEvent(channel, account.id, agent);
-        }
-
         httpsGetProxy(mediaPlaylistUrl, agent, 4096).then(res => {
           if (res.status !== 200) {
             errorCount++;
@@ -399,7 +379,6 @@ function startHLS(account) {
         const newProxy = proxyPool.getProxy(account.id);
         if (newProxy && newProxy !== account.proxy) {
           db.setProxy(account.id, newProxy);
-          tokenCache = { channel: null, data: null, expires: 0 };
           const np = parseProxy(newProxy);
           const npLabel = np ? `${np.type} ${np.host}:${np.port}` : newProxy;
           console.log(`[HLS] ${account.login}: сменили прокси на ${npLabel}`);
