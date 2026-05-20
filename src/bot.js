@@ -173,8 +173,8 @@ function getAccessToken(channel, oauthToken, agent) {
   const cleanToken = oauthToken.replace("oauth:", "");
   const body = JSON.stringify({
     operationName: "PlaybackAccessToken_Template",
-    query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature }}',
-    variables: { isLive: true, login: channel, isVod: false, vodID: "", playerType: "site" },
+    query: 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature } }',
+    variables: { isLive: true, login: channel, playerType: "site" },
   });
 
   return httpsRequestProxy({
