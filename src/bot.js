@@ -65,6 +65,10 @@ function createAgent(proxyStr) {
 function httpsRequestProxy(options, postData, agent, maxBytes) {
   return new Promise((resolve, reject) => {
     if (agent) options.agent = agent;
+    // Браузерные заголовки — Twitch фильтрует запросы без User-Agent
+    if (!options.headers) options.headers = {};
+    if (!options.headers["User-Agent"]) options.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    if (!options.headers["Client-Id"]) options.headers["Client-Id"] = "kimne78kx3ncx6brgo4mv6wki5h1ko";
     const req = https.request(options, (res) => {
       let data = "";
       let bytes = 0;
@@ -92,6 +96,12 @@ function httpsGetProxy(url, agent, maxBytes) {
       path: opts.pathname + opts.search,
       method: "GET",
       timeout: 15000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        "Origin": "https://www.twitch.tv",
+        "Referer": "https://www.twitch.tv/",
+      },
     };
     if (agent) reqOpts.agent = agent;
 
@@ -260,6 +270,23 @@ function startHLS(account) {
       let lastSegment = "";
       let segmentCounter = 0;
 
+      // Сразу качаем первый сегмент — Twitch должен увидеть активность немедленно
+      const kickstart = () => {
+        httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
+          if (res.status !== 200) return;
+          const lines = res.data.split("\n");
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            if (line && !line.startsWith("#")) {
+              lastSegment = line;
+              downloadSegment(line, agent);
+              break;
+            }
+          }
+        }).catch(() => {});
+      };
+      kickstart();
+
       const timer = setInterval(() => {
         // Media playlist лимит 8 КБ — достаточно для списка сегментов
         httpsGetProxy(mediaPlaylistUrl, agent, 8192).then(res => {
@@ -323,7 +350,12 @@ function downloadSegment(url, agent) {
       path: opts.pathname + opts.search,
       method: "GET",
       timeout: 8000,
-      headers: { "Range": "bytes=0-127" }, // только 128 байт
+      headers: {
+        "Range": "bytes=0-127",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Origin": "https://www.twitch.tv",
+        "Referer": "https://www.twitch.tv/",
+      },
     };
     if (agent) reqOpts.agent = agent;
 
