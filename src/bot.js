@@ -301,12 +301,13 @@ function startHLS(account) {
           if (line && !line.startsWith("#")) { newestSegment = line; break; }
         }
 
-        // Качаем каждый 4-й новый сегмент по 128 байт через Range.
-        // Twitch засчитывает зрителя по запросам сегментов.
+        // Качаем каждый 2-й новый сегмент по 128 байт через Range.
+        // Twitch обновляет счётчик каждые ~2 мин — нужен хотя бы 1 сегмент за это время.
+        // При интервале 25 сек и каждом 2-м сегменте = 1 запрос каждые ~50 сек. Достаточно.
         if (newestSegment && newestSegment !== lastSegment) {
           lastSegment = newestSegment;
           segmentCounter++;
-          if (segmentCounter % 4 === 0) {
+          if (segmentCounter % 2 === 0) {
             downloadSegment(newestSegment, agent);
           }
         }
