@@ -106,19 +106,38 @@ function parseProxy(line) {
   return { type, host, port, user, pass, explicitType };
 }
 
-// Конвертация в SOCKS5 URL — точно как в bot.js (для совместимости)
-function proxyToSocks5Url(p) {
+// Конвертация в URL для CycleTLS. Протокол сохраняется (CycleTLS понимает и http://, и socks5://).
+// HTTP-прокси НЕ конвертируем в socks5 — это ломало проверку HTTP-прокси.
+function proxyToUrl(p) {
   const auth = p.user ? `${encodeURIComponent(p.user)}:${encodeURIComponent(p.pass || "")}@` : "";
-  return `socks5://${auth}${p.host}:${p.port}`;
+  let scheme = (p.type || "http").toLowerCase();
+  if (scheme === "https") scheme = "http"; // для прокси https → http (CONNECT)
+  if (scheme !== "http" && scheme !== "socks4" && scheme !== "socks5") scheme = "http";
+  return `${scheme}://${auth}${p.host}:${p.port}`;
 }
+
+// Алиас для обратной совместимости
+const proxyToSocks5Url = proxyToUrl;
 
 // ---------- ЗАГРУЗКА ----------
 function loadProxies(text) {
-  const lines = String(text)
+  // 1) сперва бьём по очевидным разделителям
+  let raw = String(text)
     .replace(/\|/g, "\n")
+    .replace(/[ \t]*,[ \t]*/g, "\n")
     .split(/[\r\n]+/)
     .map(l => l.trim())
     .filter(Boolean);
+
+  // 2) внутри каждой строки разрезаем перед протокольными префиксами,
+  //    если они встречаются НЕ в начале — это "склеенные" прокси из копипаста.
+  //    Пример: "1.2.3.4:80socks5://5.6.7.8:1080http://9.0.0.1:3128"
+  const protoSplit = /(?=(?:https?|socks[45]):\/\/)/gi;
+  const lines = [];
+  for (const line of raw) {
+    const parts = line.split(protoSplit).map(s => s.trim()).filter(Boolean);
+    for (const p of parts) lines.push(p);
+  }
 
   const parsed = [];
   for (const line of lines) {
@@ -262,11 +281,9 @@ async function step3_GetMediaPlaylist(tls, proxyUrl, mediaUrl) {
   return true;
 }
 
-// Проверка одного прокси: вся цепочка
-async function checkOnce(proxy, channel) {
+// Проверка одного прокси: вся цепочка (с одним указанным URL)
+async function checkOnceWithUrl(proxyUrl, channel) {
   const tls = await initTLS();
-  const proxyUrl = proxyToSocks5Url(proxy);
-
   try {
     const token = await step1_GetToken(tls, proxyUrl, channel);
     const mediaUrl = await step2_GetMasterPlaylist(tls, proxyUrl, channel, token);
@@ -277,21 +294,44 @@ async function checkOnce(proxy, channel) {
   }
 }
 
-// Если канал оффлайн (gql вернёт null token), пробуем fallback-канал
-async function checkProxy(proxy, channel) {
-  if (!proxy) return false;
+// Проверка прокси с попыткой угадать протокол, если он не указан явно
+async function checkOnce(proxy, channel) {
+  const primaryUrl = proxyToUrl(proxy);
+  let r = await checkOnceWithUrl(primaryUrl, channel);
+  if (r.ok) return { ok: true, url: primaryUrl };
 
-  // Основная попытка на заданном канале
+  // Если протокол не указан явно — пробуем альтернативы
+  if (!proxy.explicitType) {
+    const tried = new Set([proxy.type]);
+    for (const alt of ["socks5", "http", "socks4"]) {
+      if (tried.has(alt)) continue;
+      tried.add(alt);
+      const altUrl = proxyToUrl({ ...proxy, type: alt });
+      const r2 = await checkOnceWithUrl(altUrl, channel);
+      if (r2.ok) {
+        proxy.type = alt; // запоминаем рабочий протокол
+        return { ok: true, url: altUrl };
+      }
+    }
+  }
+  return { ok: false, error: r.error };
+}
+
+// Если канал оффлайн (gql вернёт null token), пробуем fallback-канал
+// Возвращает рабочий URL прокси или null
+async function checkProxy(proxy, channel) {
+  if (!proxy) return null;
+
   let r = await checkOnce(proxy, channel);
-  if (r.ok) return true;
+  if (r.ok) return r.url;
 
   // Если шаг 1 упал из-за оффлайна канала — пробуем fallback
   if (r.error && r.error.includes("channel offline") && channel !== FALLBACK_CHANNEL) {
     r = await checkOnce(proxy, FALLBACK_CHANNEL);
-    if (r.ok) return true;
+    if (r.ok) return r.url;
   }
 
-  return false;
+  return null;
 }
 
 // ---------- ПРОВЕРКА ВСЕХ ----------
@@ -326,12 +366,15 @@ async function checkAll() {
 
   for (let i = 0; i < proxyList.length; i += BATCH_SIZE) {
     const batch = proxyList.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(batch.map(p => checkProxy(p, channel).catch(() => false)));
+    const results = await Promise.all(batch.map(p => checkProxy(p, channel).catch(() => null)));
 
     batch.forEach((p, idx) => {
-      const str = proxyToSocks5Url(p);
-      if (results[idx]) goodProxies.push(str);
-      else badProxies.add(str);
+      const workingUrl = results[idx];
+      if (workingUrl) {
+        goodProxies.push(workingUrl);
+      } else {
+        badProxies.add(proxyToUrl(p));
+      }
     });
 
     checked += batch.length;

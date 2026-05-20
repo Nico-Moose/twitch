@@ -65,14 +65,15 @@ async function tlsRequest(url, options, account) {
 }
 
 function buildProxyUrl(proxyStr) {
-  // Поддержка форматов: host:port:user:pass, user:pass@host:port, host:port@user:pass
-  // Используем SOCKS5 — proxy.market на тех же портах поддерживает оба протокола,
-  // а с SOCKS5 нет проблемы 405 Method Not Allowed (HTTP прокси не любит CycleTLS POST)
+  // Поддержка форматов: host:port, host:port:user:pass, user:pass@host:port,
+  // host:port@user:pass, http(s)://..., socks5://...
+  // Сохраняем тот протокол, который указан. Если не указан — http.
+  // (Раньше всё конвертировалось в socks5 — это ломало обычные HTTP-прокси.)
   const p = proxyStr.trim();
-  if (/^socks5:\/\//i.test(p)) return p;
+  if (/^socks[45]:\/\//i.test(p)) return p;
   if (/^https?:\/\//i.test(p)) {
-    // конвертируем http:// в socks5://
-    return p.replace(/^https?:\/\//i, "socks5://");
+    // оставляем http:// как есть; CycleTLS поддерживает HTTP CONNECT
+    return p.replace(/^https:\/\//i, "http://");
   }
 
   if (p.includes("@")) {
@@ -87,19 +88,19 @@ function buildProxyUrl(proxyStr) {
 
     if (leftIsHostPort) {
       // host:port@user:pass
-      return `socks5://${rightParts[0]}:${rightParts.slice(1).join(":")}@${leftParts[0]}:${leftPort}`;
+      return `http://${rightParts[0]}:${rightParts.slice(1).join(":")}@${leftParts[0]}:${leftPort}`;
     } else {
       // user:pass@host:port
-      return `socks5://${left}@${right}`;
+      return `http://${left}@${right}`;
     }
   }
 
   const parts = p.split(":");
   if (parts.length >= 4) {
-    return `socks5://${parts[2]}:${parts.slice(3).join(":")}@${parts[0]}:${parts[1]}`;
+    return `http://${parts[2]}:${parts.slice(3).join(":")}@${parts[0]}:${parts[1]}`;
   }
   if (parts.length === 2) {
-    return `socks5://${parts[0]}:${parts[1]}`;
+    return `http://${parts[0]}:${parts[1]}`;
   }
   return "";
 }
