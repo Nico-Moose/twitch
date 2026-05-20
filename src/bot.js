@@ -262,7 +262,7 @@ function startHLS(account) {
         errorCount++;
         if (errorCount >= 5) stopHLS(account.id);
       });
-    }, 5000);
+    }, 15000);
 
     watchers.set(account.id, { timer });
   }).catch(err => {
@@ -290,7 +290,7 @@ function downloadSegment(url, agent) {
 
     const req = https.request(reqOpts, (res) => {
       let bytes = 0;
-      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 16000) res.destroy(); });
+      res.on("data", (chunk) => { bytes += chunk.length; if (bytes > 512) res.destroy(); });
       res.on("end", () => {});
       res.on("error", () => {});
     });
