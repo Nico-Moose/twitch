@@ -9,17 +9,29 @@ let checking = false;
 
 // Загрузить список прокси
 function loadProxies(text) {
-  const lines = text.replace(/\|/g, "\n").split("\n")
-    .map(l => l.trim())
-    .filter(l => l && l.includes(":") && !l.startsWith("#"));
+  // Разбиваем по стандартным разделителям
+  let lines = text.replace(/\|/g, "\n").split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
 
-  proxyList = lines;
+  // Разбиваем склеенные прокси (без пробелов между ними)
+  // Пример: "1.2.3.4:80192.168.1.1:8080" → ["1.2.3.4:80", "192.168.1.1:8080"]
+  const result = [];
+  for (const line of lines) {
+    // Ищем паттерн ip:port повторяющийся без разделителя
+    // IP начинается с цифры, за которой идут цифры и точки
+    const parts = line.split(/(?=\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:)/);
+    for (const part of parts) {
+      const p = part.trim();
+      if (p && p.includes(":")) result.push(p);
+    }
+  }
+
+  proxyList = result;
   badProxies.clear();
   goodProxies = [];
   checking = false;
-  db.addLog("proxy", `Загружено ${lines.length} прокси`);
-  console.log(`[PROXY] Загружено ${lines.length} прокси`);
-  return lines.length;
+  db.addLog("proxy", `Загружено ${result.length} прокси`);
+  console.log(`[PROXY] Загружено ${result.length} прокси`);
+  return result.length;
 }
 
 // Парсим прокси в URL — поддерживаем все форматы включая host:port@user:pass
