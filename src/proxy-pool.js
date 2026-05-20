@@ -22,20 +22,49 @@ function loadProxies(text) {
   return lines.length;
 }
 
+// Парсим прокси в URL — поддерживаем все форматы включая host:port@user:pass
+function parseProxyUrl(proxy) {
+  try {
+    const p = proxy.trim();
+    if (!p) return null;
+
+    if (/^socks[45]:\/\//i.test(p)) return p;
+    if (/^https?:\/\//i.test(p)) return p.replace(/^https:\/\//i, "http://");
+
+    if (p.includes("@")) {
+      const at = p.lastIndexOf("@");
+      const left = p.slice(0, at);
+      const right = p.slice(at + 1);
+      const leftParts = left.split(":");
+      const rightParts = right.split(":");
+      const leftPort = parseInt(leftParts[1], 10);
+      const leftIsHostPort = leftParts.length === 2 && !isNaN(leftPort) && leftPort > 0 && leftPort < 65536;
+
+      if (leftIsHostPort) {
+        // host:port@user:pass (proxy.market формат)
+        return `http://${encodeURIComponent(rightParts[0])}:${encodeURIComponent(rightParts.slice(1).join(":"))}@${leftParts[0]}:${leftPort}`;
+      } else {
+        // user:pass@host:port
+        return `http://${left}@${right}`;
+      }
+    }
+
+    const parts = p.split(":");
+    if (parts.length >= 4) return `http://${encodeURIComponent(parts[2])}:${encodeURIComponent(parts.slice(3).join(":"))}@${parts[0]}:${parts[1]}`;
+    if (parts.length === 2) return `http://${parts[0]}:${parts[1]}`;
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Проверить один прокси через Twitch GQL
 function checkProxy(proxy) {
   return new Promise((resolve) => {
     try {
-      const parts = proxy.split(":");
-      if (parts.length < 2) return resolve(false);
+      const proxyUrl = parseProxyUrl(proxy);
+      if (!proxyUrl) return resolve(false);
 
-      const host = parts[0];
-      const port = parts[1];
-      const user = parts[2] || null;
-      const pass = parts[3] || null;
-
-      const auth = user ? `${user}:${pass}@` : "";
-      const proxyUrl = `http://${auth}${host}:${port}`;
       const agent = new HttpsProxyAgent(proxyUrl);
 
       const body = JSON.stringify({
