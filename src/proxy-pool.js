@@ -8,10 +8,10 @@ let badProxies = new Set();
 let checking = false;
 
 // Жёсткий внешний таймаут на 1 запрос (секунды для CycleTLS, мс для Promise.race)
-const CHECK_TIMEOUT_S = 10;
-const CHECK_TIMEOUT_MS = 12000;
+const CHECK_TIMEOUT_S = 8;
+const CHECK_TIMEOUT_MS = 10000;
 // Сколько прокси проверяем параллельно (ограничено CycleTLS Go-бинарником)
-const BATCH_SIZE = 20;
+const BATCH_SIZE = 50;
 
 // JA3 fingerprint реального Chrome 124 — точно как в bot.js
 const CHROME_JA3 = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0";
@@ -272,53 +272,57 @@ async function step2_GetMasterPlaylist(tls, proxyUrl, channel, tokenData) {
   return mediaUrl;
 }
 
-// Шаг 3: edge CDN → media playlist (другая подсеть, часто блочат отдельно)
-async function step3_GetMediaPlaylist(tls, proxyUrl, mediaUrl) {
-  const res = await tlsRequest(tls, mediaUrl, { method: "GET" }, proxyUrl);
-  if (res.status !== 200) throw new Error(`edge status ${res.status}`);
-  const text = typeof res.body === "string" ? res.body : "";
-  if (!text || !text.includes("#EXTM3U")) throw new Error("edge: not an m3u8");
-  return true;
-}
-
-// Проверка одного прокси: вся цепочка (с одним указанным URL)
+// Проверка одного прокси: два шага (токен + мастер-плейлист).
+// Шаг 3 (edge CDN) убран — он медленный и не нужен для проверки доступности Твича.
+// Если прокси прошёл шаги 1 и 2 — он точно работает для Твича.
 async function checkOnceWithUrl(proxyUrl, channel) {
   const tls = await initTLS();
   try {
     const token = await step1_GetToken(tls, proxyUrl, channel);
-    const mediaUrl = await step2_GetMasterPlaylist(tls, proxyUrl, channel, token);
-    await step3_GetMediaPlaylist(tls, proxyUrl, mediaUrl);
+    await step2_GetMasterPlaylist(tls, proxyUrl, channel, token);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
   }
 }
 
-// Проверка прокси с попыткой угадать протокол, если он не указан явно
+// Проверка прокси с попыткой угадать протокол, если он не указан явно.
+// Если протокол не задан — пробуем все три параллельно, берём первый рабочий.
 async function checkOnce(proxy, channel) {
   const primaryUrl = proxyToUrl(proxy);
-  let r = await checkOnceWithUrl(primaryUrl, channel);
-  if (r.ok) return { ok: true, url: primaryUrl };
 
-  // Если протокол не указан явно — пробуем альтернативы
-  if (!proxy.explicitType) {
-    const tried = new Set([proxy.type]);
-    for (const alt of ["socks5", "http", "socks4"]) {
-      if (tried.has(alt)) continue;
-      tried.add(alt);
-      const altUrl = proxyToUrl({ ...proxy, type: alt });
-      const r2 = await checkOnceWithUrl(altUrl, channel);
-      if (r2.ok) {
-        proxy.type = alt; // запоминаем рабочий протокол
-        return { ok: true, url: altUrl };
-      }
-    }
+  // Если протокол указан явно — проверяем только его
+  if (proxy.explicitType) {
+    const r = await checkOnceWithUrl(primaryUrl, channel);
+    return r.ok ? { ok: true, url: primaryUrl } : { ok: false, error: r.error };
   }
-  return { ok: false, error: r.error };
+
+  // Протокол не указан — пробуем все варианты параллельно
+  const candidates = ["socks5", "http", "socks4"].map(t => ({
+    type: t,
+    url: proxyToUrl({ ...proxy, type: t }),
+  }));
+
+  // Promise.any — возвращает первый успешный результат
+  try {
+    const winner = await Promise.any(
+      candidates.map(async c => {
+        const r = await checkOnceWithUrl(c.url, channel);
+        if (!r.ok) throw new Error(r.error);
+        return c;
+      })
+    );
+    proxy.type = winner.type; // запоминаем рабочий протокол
+    return { ok: true, url: winner.url };
+  } catch (e) {
+    // AggregateError — все провалились
+    const msg = e.errors ? e.errors.map(x => x.message).join(" | ") : String(e);
+    return { ok: false, error: msg };
+  }
 }
 
-// Если канал оффлайн (gql вернёт null token), пробуем fallback-канал
-// Возвращает рабочий URL прокси или null
+// Если канал оффлайн (gql вернёт null token), пробуем fallback-канал.
+// Возвращает рабочий URL прокси или null.
 async function checkProxy(proxy, channel) {
   if (!proxy) return null;
 
@@ -326,7 +330,8 @@ async function checkProxy(proxy, channel) {
   if (r.ok) return r.url;
 
   // Если шаг 1 упал из-за оффлайна канала — пробуем fallback
-  if (r.error && r.error.includes("channel offline") && channel !== FALLBACK_CHANNEL) {
+  const isOffline = r.error && (r.error.includes("channel offline") || r.error.includes("no token"));
+  if (isOffline && channel !== FALLBACK_CHANNEL) {
     r = await checkOnce(proxy, FALLBACK_CHANNEL);
     if (r.ok) return r.url;
   }
@@ -347,8 +352,8 @@ async function checkAll() {
   let channel = (db.getSetting("channel") || "").toLowerCase().trim();
   if (!channel) channel = FALLBACK_CHANNEL;
 
-  console.log(`[PROXY] Строгая проверка ${proxyList.length} прокси по каналу "${channel}" (батч ${BATCH_SIZE})`);
-  db.addLog("proxy", `Строгая проверка ${proxyList.length} прокси (канал: ${channel})`);
+  console.log(`[PROXY] Проверка ${proxyList.length} прокси | канал: "${channel}" | батч: ${BATCH_SIZE} | таймаут: ${CHECK_TIMEOUT_S}s`);
+  db.addLog("proxy", `Проверка ${proxyList.length} прокси (канал: ${channel})`);
 
   // Прогрев CycleTLS
   try { await initTLS(); }
@@ -378,14 +383,17 @@ async function checkAll() {
     });
 
     checked += batch.length;
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-    console.log(`[PROXY] ${checked}/${proxyList.length} | good: ${goodProxies.length} | ${elapsed}s`);
+    const elapsed = (Date.now() - t0) / 1000;
+    const speed = (checked / elapsed).toFixed(1);
+    const eta = elapsed > 0 ? ((proxyList.length - checked) / (checked / elapsed)).toFixed(0) : "?";
+    console.log(`[PROXY] ${checked}/${proxyList.length} | ✓ ${goodProxies.length} | ${elapsed.toFixed(1)}s | ${speed}/s | ETA: ${eta}s`);
   }
 
   checking = false;
   const total = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(`[PROXY] Готово за ${total}s. Рабочих: ${goodProxies.length}/${proxyList.length}`);
-  db.addLog("proxy", `Рабочих: ${goodProxies.length}/${proxyList.length} (${total}s)`);
+  const pct = proxyList.length > 0 ? ((goodProxies.length / proxyList.length) * 100).toFixed(0) : 0;
+  console.log(`[PROXY] Готово за ${total}s. Рабочих: ${goodProxies.length}/${proxyList.length} (${pct}%)`);
+  db.addLog("proxy", `Рабочих: ${goodProxies.length}/${proxyList.length} (${pct}%) за ${total}s`);
   return goodProxies.length;
 }
 
