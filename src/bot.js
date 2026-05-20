@@ -77,7 +77,7 @@ function httpsRequestProxy(options, postData, agent) {
       let bytes = 0;
       res.on("data", chunk => {
         bytes += chunk.length;
-        if (bytes > 8192) { res.destroy(); return; } // лимит 8 КБ на ответ
+        if (bytes > 16384) { res.destroy(); return; } // лимит 16 КБ на ответ
         data += chunk;
       });
       res.on("end", () => resolve({ status: res.statusCode, data }));
@@ -180,11 +180,11 @@ function getAccessToken(channel, oauthToken, agent) {
   }
 
   const cleanToken = oauthToken.replace("oauth:", "");
-  // Минимальный GraphQL запрос — только то что нужно
+  // Корректный минимальный GraphQL запрос — без $vodID в variables
   const body = JSON.stringify({
     operationName: "PlaybackAccessToken_Template",
-    query: 'query PlaybackAccessToken_Template($login:String!,$isLive:Boolean!,$vodID:ID!,$isVod:Boolean!,$playerType:String!){streamPlaybackAccessToken(channelName:$login,params:{platform:"web",playerBackend:"mediaplayer",playerType:$playerType})@include(if:$isLive){value signature}}',
-    variables: { isLive: true, login: channel, isVod: false, vodID: "", playerType: "site" },
+    query: 'query PlaybackAccessToken_Template($login:String!,$isLive:Boolean!,$playerType:String!){streamPlaybackAccessToken(channelName:$login,params:{platform:"web",playerBackend:"mediaplayer",playerType:$playerType})@include(if:$isLive){value signature}}',
+    variables: { isLive: true, login: channel, playerType: "site" },
   });
 
   return httpsRequestProxy({
